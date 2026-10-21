@@ -1,0 +1,7 @@
+{
+  "Name": "Fooyin MCP Bridge Plugin",
+  "Version": "0.1.0",
+  "Author": "Dein Name",
+  "Description": "Ein plattformübergreifendes C++ Plugin zur Steuerung von fooyin via Socket für MCP.",
+  "License": "GPL-3.0-or-later"
+}

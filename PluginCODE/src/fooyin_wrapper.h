@@ -1,0 +1,45 @@
+#pragma once
+
+#include <QObject>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <core/plugins/coreplugincontext.h>
+#include <core/track.h>
+
+namespace FooyinMCP {
+
+/**
+ * @brief High-level C++ wrapper over fooyin internal APIs.
+ * Kapselt PlayerController, MusicLibrary, PlaylistHandler und QueueController.
+ */
+class FooyinWrapper : public QObject {
+    Q_OBJECT
+public:
+    explicit FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* parent = nullptr);
+
+    // A. Playback Engine Control
+    QJsonObject controlPlayback(const QString& action, const QJsonObject& params);
+    QJsonObject getNowPlaying();
+    QJsonObject setVolumeAndMode(const QJsonObject& params);
+
+    // B. Library & FooScript Search
+    QJsonObject searchLibrary(const QString& query);
+    QJsonObject searchByFooScript(const QString& script);
+    QJsonObject getLibraryInfo();
+    QJsonObject scanLibrary();
+
+    // C. Playlists & Queue Management
+    QJsonObject getPlaylists();
+    QJsonObject createPlaylist(const QString& name);
+    QJsonObject modifyPlaylist(const QString& action, const QJsonObject& params);
+    QJsonObject manageQueue(const QString& action, const QJsonObject& params);
+
+    // D. Metadata & Ratings
+    QJsonObject setTrackRating(const QJsonObject& params);
+
+private:
+    const Fooyin::CorePluginContext& m_context;
+    QJsonObject trackToJson(const Fooyin::Track& track);
+};
+
+} // namespace FooyinMCP
