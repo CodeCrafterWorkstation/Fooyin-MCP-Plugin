@@ -6,12 +6,14 @@
 #include <QLoggingCategory>
 #include <memory>
 
+namespace FooyinMCP {
+
 Q_DECLARE_LOGGING_CATEGORY(lcMcp);
 
-namespace FooyinMCP {
 class McpServer;
 class FooyinWrapper;
-}
+
+} // namespace FooyinMCP
 
 class McpPlugin : public QObject, public Fooyin::Plugin, public Fooyin::CorePlugin {
     Q_OBJECT

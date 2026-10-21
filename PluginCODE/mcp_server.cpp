@@ -31,8 +31,8 @@ bool McpServer::start(const QString& pipeName, quint16 wsPort) {
     // SECURITY: Only listen on LocalHost to prevent unauthorized network access
     bool wsOk = m_webSocketServer->listen(QHostAddress::LocalHost, m_port);
 
-    if (localOk) qDebug() << "FooyinMCP: Pipe listening on" << m_pipeName;
-    if (wsOk) qDebug() << "FooyinMCP: WebSocket listening on localhost:" << m_port;
+    if (localOk) qCDebug(lcMcp) << "Pipe listening on" << m_pipeName;
+    if (wsOk) qCDebug(lcMcp) << "WebSocket listening on localhost:" << m_port;
 
     return localOk || wsOk;
 }
