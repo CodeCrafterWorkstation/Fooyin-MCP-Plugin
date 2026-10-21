@@ -1,16 +1,34 @@
+# IDE specific
+.idea/
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+
+# Build directories
+build/
+PluginCODE/build/
+PluginCODE/cmake-build-*/
+out/
+
+# C++ / MSVC / CMake artifacts
+*.obj
+*.o
+*.lib
+*.a
+*.dll
+*.so
+*.exe
+*.pdb
+*.suo
+*.user
+*.user.user
+*.sln
+*.vcxproj
+*.filters
+
+# Qt artifacts
+Makefile*
+*.pro.user
+/PluginCODE/fooyin_mcp_plugin_autogen/
+
+# System files
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
-/PluginCODE/build/
+Thumbs.db
