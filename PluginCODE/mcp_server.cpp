@@ -20,7 +20,6 @@ McpServer::McpServer(FooyinWrapper* wrapper, QObject* parent)
       m_tools(std::make_unique<McpTools>(wrapper, this)) {
 
     m_localServer->setSocketOptions(QLocalServer::UserAccessOption);
-    m_webSocketServer->setMaxAllowedIncomingMessageSize(MAX_MESSAGE_SIZE);
 
     connect(m_localServer, &QLocalServer::newConnection, this, &McpServer::onNewLocalConnection);
     connect(m_webSocketServer, &QWebSocketServer::newConnection, this, &McpServer::onNewWebSocketConnection);
@@ -126,7 +125,6 @@ void McpServer::onLocalReadyRead() {
         else sendError(socket, nullptr, QJsonValue::Null, -32600, QStringLiteral("Invalid Request"));
     }
 
-    // Fix DoS: prevent buffer from growing indefinitely if no newline is received
     if (socket->bytesAvailable() > MAX_MESSAGE_SIZE) {
         qCWarning(lcMcp) << "DoS: Line buffer exceeded limit without newline. Aborting.";
         socket->abort();
@@ -158,7 +156,6 @@ void McpServer::onOriginAuthenticationRequired(QWebSocketCorsAuthenticator* auth
 }
 
 bool McpServer::isAllowedOrigin(const QString& origin) {
-    // Allow empty origin for non-browser clients (CLI tools, etc.)
     if (origin.isEmpty()) return true;
 
     QUrl url(origin);
@@ -192,7 +189,6 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
     QJsonValue id = request.value(QStringLiteral("id"));
     const bool isNotification = !request.contains(QStringLiteral("id"));
 
-    // Validate ID type if present
     if (!isNotification && !id.isString() && !id.isDouble() && !id.isNull()) {
         sendError(device, webSocket, QJsonValue::Null, -32600, QStringLiteral("Invalid ID type"));
         return;
@@ -208,32 +204,50 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
 
     if (method == QStringLiteral("initialize")) {
         if (isNotification) return;
+        QJsonObject serverInfo;
+        serverInfo[QStringLiteral("name")] = QStringLiteral("fooyin-mcp-plugin");
+        serverInfo[QStringLiteral("version")] = QStringLiteral("1.2.1");
+
+        QJsonObject capabilities;
+        capabilities[QStringLiteral("tools")] = QJsonObject{{QStringLiteral("listChanged"), false}};
+
         QJsonObject result;
         result[QStringLiteral("protocolVersion")] = QStringLiteral("2024-11-05");
-        result[QStringLiteral("capabilities")] = QJsonObject{{QStringLiteral("tools"), QJsonObject{{QStringLiteral("listChanged"), false}}}};
-        result[QStringLiteral("serverInfo")] = QJsonObject{{QStringLiteral("name"), QStringLiteral("fooyin-mcp-plugin")}, {QStringLiteral("version"), QStringLiteral("1.2.1")}};
+        result[QStringLiteral("capabilities")] = capabilities;
+        result[QStringLiteral("serverInfo")] = serverInfo;
+
         sendResponse(device, webSocket, id, result);
     }
     else if (method == QStringLiteral("ping")) {
         if (!isNotification) sendResponse(device, webSocket, id, QJsonObject());
     }
     else if (method == QStringLiteral("tools/list")) {
-        if (!isNotification) sendResponse(device, webSocket, id, {{QStringLiteral("tools"), m_tools->getToolDefinitions()}});
+        if (!isNotification) sendResponse(device, webSocket, id, QJsonObject{{QStringLiteral("tools"), m_tools->getToolDefinitions()}});
     }
     else if (method == QStringLiteral("tools/call")) {
         if (isNotification) return;
         QJsonObject toolResult = m_tools->callTool(params.value(QStringLiteral("name")).toString(), params.value(QStringLiteral("arguments")).toObject());
 
         if (toolResult.value(QStringLiteral("isError")).toBool()) {
+            QJsonObject item;
+            item[QStringLiteral("type")] = QStringLiteral("text");
+            item[QStringLiteral("text")] = toolResult.value(QStringLiteral("error")).toString();
+
             QJsonObject errorData;
-            errorData[QStringLiteral("content")] = QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("text")}, {QStringLiteral("text"), toolResult.value(QStringLiteral("error")).toString()}}};
+            errorData[QStringLiteral("content")] = QJsonArray{item};
             errorData[QStringLiteral("isError")] = true;
+
             sendResponse(device, webSocket, id, errorData);
             return;
         }
 
+        QJsonObject item;
+        item[QStringLiteral("type")] = QStringLiteral("text");
+        item[QStringLiteral("text")] = QString::fromUtf8(QJsonDocument(toolResult).toJson(QJsonDocument::Compact));
+
         QJsonObject responseObj;
-        responseObj[QStringLiteral("content")] = QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("text")}, {QStringLiteral("text"), QJsonDocument(toolResult).toJson(QJsonDocument::Compact)}}};
+        responseObj[QStringLiteral("content")] = QJsonArray{item};
+
         sendResponse(device, webSocket, id, responseObj);
     }
     else if (!isNotification) {
@@ -255,10 +269,14 @@ void McpServer::sendResponse(QIODevice* device, QWebSocket* webSocket, const QJs
 }
 
 void McpServer::sendError(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, int code, const QString& message) {
+    QJsonObject errorObj;
+    errorObj[QStringLiteral("code")] = code;
+    errorObj[QStringLiteral("message")] = message;
+
     QJsonObject response;
     response[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
     response[QStringLiteral("id")] = id;
-    response[QStringLiteral("error")] = QJsonObject{{QStringLiteral("code"), code}, {QStringLiteral("message"), message}};
+    response[QStringLiteral("error")] = errorObj;
 
     QByteArray data = QJsonDocument(response).toJson(QJsonDocument::Compact);
     if (device) device->write(data + "\n");

@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <core/plugins/coreplugin.h>
 #include <core/player/playercontroller.h>
+#include <core/track.h>
 
 namespace FooyinMCP {
 
@@ -12,7 +13,7 @@ class FooyinWrapper : public QObject {
 public:
     explicit FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* parent = nullptr);
 
-    // Playback
+    // Playback Controls
     QJsonObject play();
     QJsonObject pause();
     QJsonObject stop();
@@ -20,18 +21,18 @@ public:
     QJsonObject previous();
     QJsonObject setVolume(float volume);
 
-    // Library / Playlists
+    // Playlist & Library Operations
     QJsonObject addTrack(const QString& path);
     QJsonObject enqueue(const QString& path);
     QJsonObject scanLibrary();
 
-    // Info
+    // Player Status
     QJsonObject getNowPlaying();
     QJsonObject getPlaybackState();
 
 signals:
     void nowPlayingChanged(const QJsonObject& track);
-    void playbackStateChanged(Fooyin::PlayState state);
+    void playbackStateChanged(const QString& state);
     void volumeChanged(float volume);
 
 private:

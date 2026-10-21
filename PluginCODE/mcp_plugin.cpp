@@ -9,18 +9,6 @@
 
 namespace FooyinMCP {
 
-namespace {
-QString playStateToString(Fooyin::PlayState s) {
-    switch (s) {
-        case Fooyin::PlayState::Playing: return QStringLiteral("playing");
-        case Fooyin::PlayState::Paused:  return QStringLiteral("paused");
-        case Fooyin::PlayState::Stopped: return QStringLiteral("stopped");
-        default: break;
-    }
-    return QStringLiteral("unknown");
-}
-} // namespace
-
 McpPlugin::McpPlugin(QObject* parent) : QObject(parent) {}
 
 McpPlugin::~McpPlugin() {
@@ -32,7 +20,6 @@ void McpPlugin::initialise(const Fooyin::CorePluginContext& context) {
 
     qCDebug(lcMcp) << "Initializing MCP Plugin...";
 
-    // Ownership: Plugin owns Wrapper and Server
     m_wrapper = std::make_unique<FooyinMCP::FooyinWrapper>(context);
     m_server = std::make_unique<FooyinMCP::McpServer>(m_wrapper.get());
 
@@ -45,11 +32,11 @@ void McpPlugin::initialise(const Fooyin::CorePluginContext& context) {
         }
     });
 
-    connect(m_wrapper.get(), &FooyinMCP::FooyinWrapper::playbackStateChanged, this, [this](Fooyin::PlayState state) {
+    connect(m_wrapper.get(), &FooyinMCP::FooyinWrapper::playbackStateChanged, this, [this](const QString& state) {
         if (m_server) {
             m_server->broadcastNotification(
                 QStringLiteral("notifications/playback_state"),
-                QJsonObject{{QStringLiteral("state"), playStateToString(state)}}
+                QJsonObject{{QStringLiteral("state"), state}}
             );
         }
     });
