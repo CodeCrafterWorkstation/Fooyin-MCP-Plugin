@@ -25,6 +25,7 @@ target_link_libraries(fooyin_mcp_plugin PRIVATE
     Qt6::Network
     Qt6::Concurrent
     Qt6::Widgets
+    Qt6::WebSockets
     fooyin::sdk
 )
 

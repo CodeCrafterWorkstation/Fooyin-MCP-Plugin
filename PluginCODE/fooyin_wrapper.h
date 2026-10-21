@@ -13,6 +13,12 @@ class FooyinWrapper : public QObject {
 public:
     explicit FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* parent = nullptr);
 
+Q_SIGNALS:
+    void nowPlayingChanged(const QJsonObject& track);
+    void playbackStateChanged(int state);
+    void volumeChanged(float volume);
+
+public:
     // A. Playback Engine Control
     QJsonObject controlPlayback(const QString& action, const QJsonObject& params);
     QJsonObject getNowPlaying();

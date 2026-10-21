@@ -6,6 +6,7 @@
 #include <QtWebSockets/QWebSocketServer>
 #include <QtWebSockets/QWebSocket>
 #include <QJsonObject>
+#include <QList>
 #include <memory>
 #include "fooyin_wrapper.h"
 #include "mcp_tools.h"
@@ -19,6 +20,9 @@ public:
 
     bool start(const QString& pipeName = "\\\\.\\pipe\\fooyin_mcp", quint16 wsPort = 8080);
     void stop();
+
+    // Broadcast a notification to all connected clients (MCP 10/10 Feature)
+    void broadcastNotification(const QString& method, const QJsonObject& params);
 
 private slots:
     // Pipe slots
@@ -37,6 +41,8 @@ private:
     void sendError(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, int code, const QString& message);
 
     QLocalServer* m_localServer;
+    QList<QLocalSocket*> m_localClients;
+
     QWebSocketServer* m_webSocketServer;
     QList<QWebSocket*> m_webSocketClients;
 

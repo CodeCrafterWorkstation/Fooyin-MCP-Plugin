@@ -10,7 +10,22 @@
 namespace FooyinMCP {
 
 FooyinWrapper::FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* parent)
-    : QObject(parent), m_context(context) {}
+    : QObject(parent), m_context(context) {
+
+    // Connect to player signals for real-time updates
+    auto* player = m_context.playerController;
+    connect(player, &Fooyin::PlayerController::currentTrackChanged, this, [this](const Fooyin::Track& track) {
+        emit nowPlayingChanged(trackToJson(track));
+    });
+
+    connect(player, &Fooyin::PlayerController::playStateChanged, this, [this](Fooyin::PlayState state) {
+        emit playbackStateChanged(static_cast<int>(state));
+    });
+
+    connect(player, &Fooyin::PlayerController::volumeChanged, this, [this](float volume) {
+        emit volumeChanged(volume);
+    });
+}
 
 QJsonObject FooyinWrapper::trackToJson(const Fooyin::Track& track) {
     QJsonObject obj;
