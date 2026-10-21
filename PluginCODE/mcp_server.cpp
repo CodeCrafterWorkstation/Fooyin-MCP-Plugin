@@ -1,8 +1,10 @@
-#include "mcp_server.h"
+#include "mcp_plugin.h" // For lcMcp category
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QDebug>
 #include <QLocalSocket>
+#include <QMetaObject>
+#include <QThread>
 
 namespace FooyinMCP {
 
@@ -10,6 +12,8 @@ McpServer::McpServer(FooyinWrapper* wrapper, QObject* parent)
     : QObject(parent),
       m_localServer(new QLocalServer(this)),
       m_webSocketServer(new QWebSocketServer(QStringLiteral("Fooyin MCP Server"), QWebSocketServer::NonSecureMode, this)),
+      m_pipeName(DEFAULT_PIPE_NAME),
+      m_port(DEFAULT_WS_PORT),
       m_wrapper(wrapper),
       m_tools(std::make_unique<McpTools>(wrapper, this)) {
 
@@ -18,12 +22,17 @@ McpServer::McpServer(FooyinWrapper* wrapper, QObject* parent)
 }
 
 bool McpServer::start(const QString& pipeName, quint16 wsPort) {
-    QLocalServer::removeServer(pipeName);
-    bool localOk = m_localServer->listen(pipeName);
-    bool wsOk = m_webSocketServer->listen(QHostAddress::Any, wsPort);
+    m_pipeName = pipeName;
+    m_port = wsPort;
 
-    if (localOk) qDebug() << "MCP Pipe listening on" << pipeName;
-    if (wsOk) qDebug() << "MCP WebSocket listening on port" << wsPort;
+    QLocalServer::removeServer(m_pipeName);
+    bool localOk = m_localServer->listen(m_pipeName);
+
+    // SECURITY: Only listen on LocalHost to prevent unauthorized network access
+    bool wsOk = m_webSocketServer->listen(QHostAddress::LocalHost, m_port);
+
+    if (localOk) qDebug() << "FooyinMCP: Pipe listening on" << m_pipeName;
+    if (wsOk) qDebug() << "FooyinMCP: WebSocket listening on localhost:" << m_port;
 
     return localOk || wsOk;
 }
@@ -31,14 +40,31 @@ bool McpServer::start(const QString& pipeName, quint16 wsPort) {
 void McpServer::stop() {
     m_localServer->close();
     m_webSocketServer->close();
-    for(auto* s : m_localClients) s->disconnect();
+
+    for(auto* s : m_localClients) {
+        s->disconnect();
+        s->close();
+    }
     qDeleteAll(m_localClients);
     m_localClients.clear();
+
+    for(auto* ws : m_webSocketClients) {
+        ws->disconnect();
+        ws->close();
+    }
     qDeleteAll(m_webSocketClients);
     m_webSocketClients.clear();
 }
 
 void McpServer::broadcastNotification(const QString& method, const QJsonObject& params) {
+    // Ensure thread-safety: if called from a different thread, invoke on this object's thread
+    if (thread() != QThread::currentThread()) {
+        QMetaObject::invokeMethod(this, [this, method, params] {
+            broadcastNotification(method, params);
+        }, Qt::QueuedConnection);
+        return;
+    }
+
     QJsonObject notification;
     notification["jsonrpc"] = "2.0";
     notification["method"] = method;
@@ -47,7 +73,9 @@ void McpServer::broadcastNotification(const QString& method, const QJsonObject& 
     QByteArray data = QJsonDocument(notification).toJson(QJsonDocument::Compact) + "\n";
 
     for (auto* socket : m_localClients) {
-        socket->write(data);
+        if (socket->state() == QLocalSocket::ConnectedState) {
+            socket->write(data);
+        }
     }
 
     QString wsData = QString::fromUtf8(data).trimmed();
@@ -90,6 +118,16 @@ void McpServer::onNewWebSocketConnection() {
     QWebSocket* socket = m_webSocketServer->nextPendingConnection();
     if (!socket) return;
 
+    // SECURITY: Origin Check to prevent Cross-Site WebSocket Hijacking (CSWH)
+    // Most MCP clients don't send an Origin. Browsers do.
+    QString origin = socket->origin();
+    if (!origin.isEmpty() && !origin.startsWith(QStringLiteral("http://localhost")) && !origin.startsWith(QStringLiteral("http://127.0.0.1"))) {
+        qCCritical(lcMcp) << "MCP Security: Rejecting WebSocket connection from unauthorized origin:" << origin;
+        socket->abort();
+        socket->deleteLater();
+        return;
+    }
+
     m_webSocketClients << socket;
     connect(socket, &QWebSocket::textMessageReceived, this, &McpServer::onWebSocketMessageReceived);
     connect(socket, &QWebSocket::disconnected, this, &McpServer::onWebSocketDisconnected);
@@ -124,7 +162,7 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
         QJsonObject capabilities;
         capabilities["tools"] = QJsonObject();
         result["capabilities"] = capabilities;
-        result["serverInfo"] = QJsonObject{{"name", "fooyin-mcp-plugin"}, {"version", "1.1.0"}};
+        result["serverInfo"] = QJsonObject{{"name", "fooyin-mcp-plugin"}, {"version", "1.2.0"}};
         sendResponse(device, webSocket, id, result);
     }
     else if (method == "tools/list") {

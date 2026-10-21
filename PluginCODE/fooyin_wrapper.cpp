@@ -19,7 +19,7 @@ FooyinWrapper::FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* 
     });
 
     connect(player, &Fooyin::PlayerController::playStateChanged, this, [this](Fooyin::PlayState state) {
-        emit playbackStateChanged(static_cast<int>(state));
+        emit playbackStateChanged(state);
     });
 
     connect(player, &Fooyin::PlayerController::volumeChanged, this, [this](float volume) {

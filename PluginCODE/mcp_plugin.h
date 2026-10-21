@@ -3,7 +3,10 @@
 #include <core/plugins/plugin.h>
 #include <core/plugins/coreplugin.h>
 #include <QObject>
+#include <QLoggingCategory>
 #include <memory>
+
+Q_DECLARE_LOGGING_CATEGORY(lcMcp);
 
 namespace FooyinMCP {
 class McpServer;

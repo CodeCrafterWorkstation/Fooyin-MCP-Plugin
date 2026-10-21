@@ -6,6 +6,8 @@
 #include <core/plugins/coreplugincontext.h>
 #include <core/track.h>
 
+#include <core/playercontroller.h>
+
 namespace FooyinMCP {
 
 class FooyinWrapper : public QObject {
@@ -15,7 +17,7 @@ public:
 
 Q_SIGNALS:
     void nowPlayingChanged(const QJsonObject& track);
-    void playbackStateChanged(int state);
+    void playbackStateChanged(Fooyin::PlayState state);
     void volumeChanged(float volume);
 
 public:

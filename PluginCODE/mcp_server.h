@@ -16,13 +16,20 @@ namespace FooyinMCP {
 class McpServer : public QObject {
     Q_OBJECT
 public:
+    static constexpr const char* DEFAULT_PIPE_NAME = "\\\\.\\pipe\\fooyin_mcp";
+    static constexpr quint16 DEFAULT_WS_PORT = 8080;
+
     explicit McpServer(FooyinWrapper* wrapper, QObject* parent = nullptr);
 
-    bool start(const QString& pipeName = "\\\\.\\pipe\\fooyin_mcp", quint16 wsPort = 8080);
+    bool start(const QString& pipeName = DEFAULT_PIPE_NAME, quint16 wsPort = DEFAULT_WS_PORT);
     void stop();
 
     // Broadcast a notification to all connected clients (MCP 10/10 Feature)
+    // Marked thread-safe via QMetaObject::invokeMethod if called from other threads
     void broadcastNotification(const QString& method, const QJsonObject& params);
+
+    QString pipeName() const { return m_pipeName; }
+    quint16 port() const { return m_port; }
 
 private slots:
     // Pipe slots
@@ -46,7 +53,10 @@ private:
     QWebSocketServer* m_webSocketServer;
     QList<QWebSocket*> m_webSocketClients;
 
-    FooyinWrapper* m_wrapper;
+    QString m_pipeName;
+    quint16 m_port;
+
+    FooyinWrapper* m_wrapper; // Weak pointer, lifetime managed by McpPlugin
     std::unique_ptr<McpTools> m_tools;
 };
 
