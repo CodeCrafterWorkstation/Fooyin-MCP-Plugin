@@ -2,39 +2,63 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QDebug>
+#include <QLocalSocket>
 
 namespace FooyinMCP {
 
 McpServer::McpServer(FooyinWrapper* wrapper, QObject* parent)
-    : QObject(parent), m_server(new QLocalServer(this)), m_wrapper(wrapper),
+    : QObject(parent),
+      m_localServer(new QLocalServer(this)),
+      m_webSocketServer(new QWebSocketServer(QStringLiteral("Fooyin MCP Server"), QWebSocketServer::NonSecureMode, this)),
+      m_wrapper(wrapper),
       m_tools(std::make_unique<McpTools>(wrapper, this)) {
-    connect(m_server, &QLocalServer::newConnection, this, &McpServer::onNewConnection);
+
+    // Pipe connections
+    connect(m_localServer, &QLocalServer::newConnection, this, &McpServer::onNewLocalConnection);
+
+    // WebSocket connections
+    connect(m_webSocketServer, &QWebSocketServer::newConnection, this, &McpServer::onNewWebSocketConnection);
 }
 
-bool McpServer::start(const QString& pipeName) {
+bool McpServer::start(const QString& pipeName, quint16 wsPort) {
+    // Start Named Pipe
     QLocalServer::removeServer(pipeName);
-    bool ok = m_server->listen(pipeName);
-    if (ok) {
-        qDebug() << "MCP Server listening on" << pipeName;
+    bool localOk = m_localServer->listen(pipeName);
+    if (localOk) {
+        qDebug() << "MCP Local Server (Pipe) listening on" << pipeName;
     } else {
-        qCritical() << "MCP Server failed to listen on" << pipeName << ":" << m_server->errorString();
+        qCritical() << "MCP Local Server failed to listen on" << pipeName << ":" << m_localServer->errorString();
     }
-    return ok;
+
+    // Start WebSocket
+    bool wsOk = m_webSocketServer->listen(QHostAddress::Any, wsPort);
+    if (wsOk) {
+        qDebug() << "MCP WebSocket Server listening on port" << wsPort;
+    } else {
+        qCritical() << "MCP WebSocket Server failed to listen on port" << wsPort << ":" << m_webSocketServer->errorString();
+    }
+
+    return localOk || wsOk;
 }
 
 void McpServer::stop() {
-    m_server->close();
+    m_localServer->close();
+    m_webSocketServer->close();
+    qDeleteAll(m_webSocketClients.begin(), m_webSocketClients.end());
+    m_webSocketClients.clear();
 }
 
-void McpServer::onNewConnection() {
-    QLocalSocket* socket = m_server->nextPendingConnection();
+// --- Local Socket (Pipe) Handlers ---
+
+void McpServer::onNewLocalConnection() {
+    QLocalSocket* socket = m_localServer->nextPendingConnection();
     if (!socket) return;
 
-    connect(socket, &QLocalSocket::readyRead, this, &McpServer::onReadyRead);
-    connect(socket, &QLocalSocket::disconnected, this, &McpServer::onDisconnected);
+    connect(socket, &QLocalSocket::readyRead, this, &McpServer::onLocalReadyRead);
+    connect(socket, &QLocalSocket::disconnected, this, &McpServer::onLocalDisconnected);
 }
 
-void McpServer::onReadyRead() {
+void McpServer::onLocalReadyRead() {
     auto* socket = qobject_cast<QLocalSocket*>(sender());
     if (!socket) return;
 
@@ -42,33 +66,65 @@ void McpServer::onReadyRead() {
         QByteArray data = socket->readLine();
         QJsonDocument doc = QJsonDocument::fromJson(data);
         if (doc.isObject()) {
-            handleRequest(socket, doc.object());
+            handleRequest(socket, nullptr, doc.object());
         }
     }
 }
 
-void McpServer::onDisconnected() {
+void McpServer::onLocalDisconnected() {
     auto* socket = qobject_cast<QLocalSocket*>(sender());
     if (socket) socket->deleteLater();
 }
 
-void McpServer::handleRequest(QLocalSocket* socket, const QJsonObject& request) {
+// --- WebSocket Handlers ---
+
+void McpServer::onNewWebSocketConnection() {
+    QWebSocket* socket = m_webSocketServer->nextPendingConnection();
+    if (!socket) return;
+
+    connect(socket, &QWebSocket::textMessageReceived, this, &McpServer::onWebSocketMessageReceived);
+    connect(socket, &QWebSocket::disconnected, this, &McpServer::onWebSocketDisconnected);
+
+    m_webSocketClients << socket;
+}
+
+void McpServer::onWebSocketMessageReceived(const QString& message) {
+    auto* socket = qobject_cast<QWebSocket*>(sender());
+    if (!socket) return;
+
+    QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8());
+    if (doc.isObject()) {
+        handleRequest(nullptr, socket, doc.object());
+    }
+}
+
+void McpServer::onWebSocketDisconnected() {
+    auto* socket = qobject_cast<QWebSocket*>(sender());
+    if (socket) {
+        m_webSocketClients.removeAll(socket);
+        socket->deleteLater();
+    }
+}
+
+// --- Dispatcher ---
+
+void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJsonObject& request) {
     QString method = request.value("method").toString();
     QJsonValue id = request.value("id");
     QJsonObject params = request.value("params").toObject();
 
     if (method == "initialize") {
         QJsonObject result;
-        result["protocolVersion"] = "2024-11-05"; // MCP version
+        result["protocolVersion"] = "2024-11-05";
         QJsonObject capabilities;
         capabilities["tools"] = QJsonObject();
         result["capabilities"] = capabilities;
-        result["serverInfo"] = QJsonObject{{"name", "fooyin-mcp-plugin"}, {"version", "1.0.0"}};
-        sendResponse(socket, id, result);
+        result["serverInfo"] = QJsonObject{{"name", "fooyin-mcp-plugin"}, {"version", "1.1.0"}};
+        sendResponse(device, webSocket, id, result);
     }
     else if (method == "tools/list") {
         QJsonArray tools = m_tools->getToolDefinitions();
-        sendResponse(socket, id, {{"tools", tools}});
+        sendResponse(device, webSocket, id, {{"tools", tools}});
     }
     else if (method == "tools/call") {
         QString toolName = params.value("name").toString();
@@ -81,30 +137,39 @@ void McpServer::handleRequest(QLocalSocket* socket, const QJsonObject& request) 
             {"text", QJsonDocument(toolResult).toJson(QJsonDocument::Indented)}
         });
 
-        sendResponse(socket, id, {{"content", content}});
-    }
-    else if (method == "notifications/initialized") {
-        // Just consume
+        sendResponse(device, webSocket, id, {{"content", content}});
     }
     else {
-        sendError(socket, id, -32601, "Method not found: " + method);
+        sendError(device, webSocket, id, -32601, "Method not found: " + method);
     }
 }
 
-void McpServer::sendResponse(QLocalSocket* socket, const QJsonValue& id, const QJsonObject& result) {
+void McpServer::sendResponse(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, const QJsonObject& result) {
     QJsonObject response;
     response["jsonrpc"] = "2.0";
     response["id"] = id;
     response["result"] = result;
-    socket->write(QJsonDocument(response).toJson(QJsonDocument::Compact) + "\n");
+
+    QByteArray data = QJsonDocument(response).toJson(QJsonDocument::Compact);
+    if (device) {
+        device->write(data + "\n");
+    } else if (webSocket) {
+        webSocket->sendTextMessage(QString::fromUtf8(data));
+    }
 }
 
-void McpServer::sendError(QLocalSocket* socket, const QJsonValue& id, int code, const QString& message) {
+void McpServer::sendError(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, int code, const QString& message) {
     QJsonObject response;
     response["jsonrpc"] = "2.0";
     response["id"] = id;
     response["error"] = QJsonObject{{"code", code}, {"message", message}};
-    socket->write(QJsonDocument(response).toJson(QJsonDocument::Compact) + "\n");
+
+    QByteArray data = QJsonDocument(response).toJson(QJsonDocument::Compact);
+    if (device) {
+        device->write(data + "\n");
+    } else if (webSocket) {
+        webSocket->sendTextMessage(QString::fromUtf8(data));
+    }
 }
 
 } // namespace FooyinMCP

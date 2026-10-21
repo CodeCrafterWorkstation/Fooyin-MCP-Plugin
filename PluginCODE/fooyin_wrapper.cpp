@@ -132,9 +132,18 @@ QJsonObject FooyinWrapper::manageQueue(const QString& action, const QJsonObject&
         player->clearQueue();
         return {{"status", "queue_cleared"}};
     } else if (action == "enqueue") {
-        // Hier müsste man einen Track-Pointer aus dem Pfad/ID holen
-        // Das erfordert meist Zugriff auf die Library über die ID
-        return {{"status", "not_fully_implemented_yet"}};
+        QString path = params.value("path").toString();
+        if (path.isEmpty()) return {{"error", "No path provided"}};
+
+        // Suche Track in der Library, um ein valides Objekt zu erhalten
+        auto tracks = m_context.library->tracks();
+        for (const auto& track : tracks) {
+            if (track.filepath() == path) {
+                player->enqueue(track);
+                return {{"status", "enqueued"}, {"title", track.title()}};
+            }
+        }
+        return {{"error", "Track not found in library"}};
     }
     return {{"error", "Unknown action"}};
 }
@@ -158,6 +167,23 @@ QJsonObject FooyinWrapper::setTrackRating(const QJsonObject& params) {
     // Da Track-Objekte oft Kopien sind, muss das Rating über die Library
     // oder das File-Tag-System von Fooyin persistiert werden.
     return {{"status", "rating_not_implemented"}};
+}
+
+QJsonObject FooyinWrapper::smartPlay(const QString& query) {
+    auto* library = m_context.library;
+    auto* player = m_context.playerController;
+
+    Fooyin::TrackList allTracks = library->tracks();
+    for (const auto& track : allTracks) {
+        if (track.title().contains(query, Qt::CaseInsensitive) ||
+            track.artist().contains(query, Qt::CaseInsensitive)) {
+
+            player->stop();
+            player->play(track);
+            return {{"status", "playing"}, {"track", trackToJson(track)}};
+        }
+    }
+    return {{"status", "not_found"}};
 }
 
 } // namespace FooyinMCP

@@ -17,6 +17,7 @@ public:
     QJsonObject controlPlayback(const QString& action, const QJsonObject& params);
     QJsonObject getNowPlaying();
     QJsonObject setVolumeAndMode(const QJsonObject& params);
+    QJsonObject smartPlay(const QString& query);
 
     // B. Library & Search
     QJsonObject searchLibrary(const QString& query);

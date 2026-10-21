@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Network Concurrent Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Network Concurrent Widgets WebSockets)
 find_package(fooyin REQUIRED)
 
 add_library(fooyin_mcp_plugin SHARED

@@ -44,6 +44,14 @@ void McpTools::registerTools() {
     m_handlers["set_volume_mode"] = [this](const QJsonObject& args) {
         return m_wrapper->setVolumeAndMode(args);
     };
+
+    m_handlers["manage_queue"] = [this](const QJsonObject& args) {
+        return m_wrapper->manageQueue(args.value("action").toString(), args);
+    };
+
+    m_handlers["smart_play"] = [this](const QJsonObject& args) {
+        return m_wrapper->smartPlay(args.value("query").toString());
+    };
 }
 
 QJsonArray McpTools::getToolDefinitions() const {
@@ -92,6 +100,23 @@ QJsonArray McpTools::getToolDefinitions() const {
         {"shuffle", QJsonObject{{"type", "boolean"}}}
     }}};
     tools.append(vol);
+
+    // 6. Queue Management
+    QJsonObject queue;
+    queue["name"] = "manage_queue";
+    queue["description"] = "Manage the playback queue (add tracks to play next or clear queue)";
+    QJsonObject qProps;
+    qProps["action"] = QJsonObject{{"type", "string"}, {"enum", QJsonArray{"enqueue", "clear"}}};
+    qProps["path"] = QJsonObject{{"type", "string"}, {"description", "Full file path of the track to enqueue"}};
+    queue["inputSchema"] = QJsonObject{{"type", "object"}, {"properties", qProps}, {"required", QJsonArray{"action"}}};
+    tools.append(queue);
+
+    // 7. Smart Play
+    QJsonObject smart;
+    smart["name"] = "smart_play";
+    smart["description"] = "Search for a track and play it immediately (best match)";
+    smart["inputSchema"] = QJsonObject{{"type", "object"}, {"properties", QJsonObject{{"query", QJsonObject{{"type", "string"}}}}}, {"required", QJsonArray{"query"}}};
+    tools.append(smart);
 
     return tools;
 }

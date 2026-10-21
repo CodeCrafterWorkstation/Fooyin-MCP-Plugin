@@ -18,7 +18,7 @@ void McpPlugin::initialise(const Fooyin::CorePluginContext& context) {
     m_server = std::make_unique<FooyinMCP::McpServer>(m_wrapper.get());
 
     if (m_server->start()) {
-        qDebug() << "FooyinMCP: Server started on pipe \\\\.\\pipe\\fooyin_mcp";
+        qDebug() << "FooyinMCP: Server started. Pipe: \\\\.\\pipe\\fooyin_mcp | WebSocket: port 8080";
     } else {
         qCritical() << "FooyinMCP: Failed to start server!";
     }
