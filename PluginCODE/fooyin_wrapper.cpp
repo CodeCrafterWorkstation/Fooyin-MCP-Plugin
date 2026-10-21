@@ -5,200 +5,141 @@
 #include <core/playlist/playlist.h>
 #include <core/track.h>
 #include <QJsonArray>
-#include <QUrl>
+#include <QFileInfo>
 
 namespace FooyinMCP {
 
 FooyinWrapper::FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* parent)
     : QObject(parent), m_context(context) {
 
-    // Connect to player signals for real-time updates
     auto* player = m_context.playerController;
-    connect(player, &Fooyin::PlayerController::currentTrackChanged, this, [this](const Fooyin::Track& track) {
-        emit nowPlayingChanged(trackToJson(track));
-    });
+    if (player) {
+        connect(player, &Fooyin::PlayerController::currentTrackChanged, this, [this](const Fooyin::Track& track) {
+            emit nowPlayingChanged(trackToJson(track));
+        });
 
-    connect(player, &Fooyin::PlayerController::playStateChanged, this, [this](Fooyin::PlayState state) {
-        emit playbackStateChanged(state);
-    });
+        connect(player, &Fooyin::PlayerController::playStateChanged, this, [this](Fooyin::PlayState state) {
+            emit playbackStateChanged(state);
+        });
 
-    connect(player, &Fooyin::PlayerController::volumeChanged, this, [this](float volume) {
-        emit volumeChanged(volume);
-    });
+        connect(player, &Fooyin::PlayerController::volumeChanged, this, [this](float volume) {
+            emit volumeChanged(volume);
+        });
+    }
 }
 
 QJsonObject FooyinWrapper::trackToJson(const Fooyin::Track& track) {
+    if (!track.isValid()) return QJsonObject();
     QJsonObject obj;
-    if (!track.isValid()) return obj;
-
-    obj["id"] = QString::number(track.id());
-    obj["title"] = track.title();
-    obj["artist"] = track.artist();
-    obj["album"] = track.album();
-    obj["albumArtist"] = track.albumArtist();
-    obj["genre"] = track.genre();
-    obj["year"] = static_cast<int>(track.year());
-    obj["duration"] = static_cast<double>(track.duration());
-    obj["path"] = track.filepath();
-    obj["rating"] = track.ratingStars();
+    obj[QStringLiteral("title")] = track.title();
+    obj[QStringLiteral("artist")] = track.artist();
+    obj[QStringLiteral("album")] = track.album();
+    obj[QStringLiteral("path")] = track.filepath();
+    obj[QStringLiteral("duration")] = static_cast<double>(track.duration());
     return obj;
 }
 
-QJsonObject FooyinWrapper::controlPlayback(const QString& action, const QJsonObject& params) {
-    auto* player = m_context.playerController;
-    if (action == "play") player->play();
-    else if (action == "pause") player->pause();
-    else if (action == "stop") player->stop();
-    else if (action == "playPause") player->playPause();
-    else if (action == "next") player->next();
-    else if (action == "previous") player->previous();
-    else if (action == "seek") player->seek(params.value("positionMs").toVariant().toULongLong());
-
-    return {{"status", "ok"}, {"action", action}};
+QJsonObject FooyinWrapper::play() {
+    if (!m_context.playerController) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
+    m_context.playerController->play();
+    return {{QStringLiteral("ok"), true}};
 }
 
-QJsonObject FooyinWrapper::getNowPlaying() {
-    auto* player = m_context.playerController;
-    Fooyin::Track track = player->currentTrack();
-
-    QJsonObject result;
-    result["track"] = trackToJson(track);
-    result["positionMs"] = static_cast<double>(player->currentPosition());
-    result["state"] = static_cast<int>(player->playState());
-    result["volume"] = player->volume();
-    return result;
+QJsonObject FooyinWrapper::pause() {
+    if (!m_context.playerController) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
+    m_context.playerController->pause();
+    return {{QStringLiteral("ok"), true}};
 }
 
-QJsonObject FooyinWrapper::searchLibrary(const QString& query) {
-    auto* library = m_context.library;
-    Fooyin::TrackList allTracks = library->tracks();
-    QJsonArray results;
+QJsonObject FooyinWrapper::stop() {
+    if (!m_context.playerController) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
+    m_context.playerController->stop();
+    return {{QStringLiteral("ok"), true}};
+}
 
-    int count = 0;
-    for (const auto& track : allTracks) {
-        if (track.title().contains(query, Qt::CaseInsensitive) ||
-            track.artist().contains(query, Qt::CaseInsensitive) ||
-            track.album().contains(query, Qt::CaseInsensitive)) {
-            results.append(trackToJson(track));
-            if (++count >= 50) break;
+QJsonObject FooyinWrapper::next() {
+    if (!m_context.playerController) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
+    m_context.playerController->next();
+    return {{QStringLiteral("ok"), true}};
+}
+
+QJsonObject FooyinWrapper::previous() {
+    if (!m_context.playerController) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
+    m_context.playerController->previous();
+    return {{QStringLiteral("ok"), true}};
+}
+
+QJsonObject FooyinWrapper::setVolume(float volume) {
+    if (!m_context.playerController) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
+    float vol = qBound(0.0f, volume, 1.0f);
+    m_context.playerController->setVolume(vol);
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("volume"), static_cast<double>(vol)}};
+}
+
+QJsonObject FooyinWrapper::addTrack(const QString& path) {
+    if (!m_context.playlistHandler) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Playlist handler not available")}};
+
+    QFileInfo fi(path);
+    if (!fi.exists() || !fi.isFile()) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("File not found")}};
+    }
+
+    auto* pl = m_context.playlistHandler->currentPlaylist();
+    if (!pl) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("No active playlist")}};
+
+    pl->addFile(path);
+    return {{QStringLiteral("ok"), true}};
+}
+
+QJsonObject FooyinWrapper::enqueue(const QString& path) {
+    if (!m_context.playerController || !m_context.library)
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player or Library not available")}};
+
+    QFileInfo fi(path);
+    if (!fi.exists() || !fi.isFile()) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("File not found")}};
+    }
+
+    auto tracks = m_context.library->tracks();
+    for (const auto& track : tracks) {
+        if (track.filepath() == path) {
+            m_context.playerController->enqueue(track);
+            return {{QStringLiteral("ok"), true}};
         }
     }
-    return {{"tracks", results}, {"query", query}, {"count", results.size()}};
-}
-
-QJsonObject FooyinWrapper::getLibraryInfo() {
-    auto* library = m_context.library;
-    QJsonObject info;
-    info["totalTracks"] = static_cast<int>(library->tracks().size());
-    return info;
+    return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Track not in library")}};
 }
 
 QJsonObject FooyinWrapper::scanLibrary() {
+    if (!m_context.library) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Library not available")}};
     m_context.library->refreshAll();
-    return {{"status", "scan_started"}};
+    return {{QStringLiteral("ok"), true}};
 }
 
-QJsonObject FooyinWrapper::getPlaylists() {
-    auto* handler = m_context.playlistHandler;
-    QJsonArray list;
-
-    auto playlists = handler->playlists();
-    for (int i = 0; i < playlists.size(); ++i) {
-        auto* pl = playlists[i];
-        QJsonObject plObj;
-        plObj["index"] = i;
-        plObj["name"] = pl->name();
-        plObj["trackCount"] = pl->rowCount();
-        list.append(plObj);
-    }
-    return {{"playlists", list}};
-}
-
-QJsonObject FooyinWrapper::createPlaylist(const QString& name) {
-    m_context.playlistHandler->createPlaylist(name);
-    return {{"status", "created", "name", name}};
-}
-
-QJsonObject FooyinWrapper::modifyPlaylist(const QString& action, const QJsonObject& params) {
-    auto* handler = m_context.playlistHandler;
-    int plIndex = params.value("playlistIndex").toInt(-1);
-
-    if (plIndex < 0 || plIndex >= handler->playlists().size())
-        return {{"error", "Invalid playlist index"}};
-
-    auto* pl = handler->playlists()[plIndex];
-
-    if (action == "addTrack") {
-        QString path = params.value("path").toString();
-        pl->addFile(path);
-        return {{"status", "track_added"}};
-    } else if (action == "removeTrack") {
-        int row = params.value("row").toInt();
-        pl->removeRow(row);
-        return {{"status", "track_removed"}};
-    }
-
-    return {{"error", "Unknown action"}};
-}
-
-QJsonObject FooyinWrapper::manageQueue(const QString& action, const QJsonObject& params) {
+QJsonObject FooyinWrapper::getNowPlaying() {
+    if (!m_context.playerController) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
     auto* player = m_context.playerController;
-    if (action == "clear") {
-        player->clearQueue();
-        return {{"status", "queue_cleared"}};
-    } else if (action == "enqueue") {
-        QString path = params.value("path").toString();
-        if (path.isEmpty()) return {{"error", "No path provided"}};
-
-        // Suche Track in der Library, um ein valides Objekt zu erhalten
-        auto tracks = m_context.library->tracks();
-        for (const auto& track : tracks) {
-            if (track.filepath() == path) {
-                player->enqueue(track);
-                return {{"status", "enqueued"}, {"title", track.title()}};
-            }
-        }
-        return {{"error", "Track not found in library"}};
-    }
-    return {{"error", "Unknown action"}};
+    return {
+        {QStringLiteral("ok"), true},
+        {QStringLiteral("track"), trackToJson(player->currentTrack())},
+        {QStringLiteral("position"), static_cast<double>(player->currentPosition())}
+    };
 }
 
-QJsonObject FooyinWrapper::setVolumeAndMode(const QJsonObject& params) {
+QJsonObject FooyinWrapper::getPlaybackState() {
+    if (!m_context.playerController) return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
     auto* player = m_context.playerController;
-
-    if (params.contains("volume")) {
-        player->setVolume(static_cast<float>(params.value("volume").toDouble()));
+    QString state = QStringLiteral("stopped");
+    switch (player->playState()) {
+        case Fooyin::PlayState::Playing: state = QStringLiteral("playing"); break;
+        case Fooyin::PlayState::Paused:  state = QStringLiteral("paused"); break;
+        default: break;
     }
-
-    if (params.contains("shuffle")) {
-        // Fooyin PlayerController hat meist setShuffle(bool)
-        // player->setShuffle(params.value("shuffle").toBool());
-    }
-
-    return {{"status", "ok"}};
-}
-
-QJsonObject FooyinWrapper::setTrackRating(const QJsonObject& params) {
-    // Da Track-Objekte oft Kopien sind, muss das Rating über die Library
-    // oder das File-Tag-System von Fooyin persistiert werden.
-    return {{"status", "rating_not_implemented"}};
-}
-
-QJsonObject FooyinWrapper::smartPlay(const QString& query) {
-    auto* library = m_context.library;
-    auto* player = m_context.playerController;
-
-    Fooyin::TrackList allTracks = library->tracks();
-    for (const auto& track : allTracks) {
-        if (track.title().contains(query, Qt::CaseInsensitive) ||
-            track.artist().contains(query, Qt::CaseInsensitive)) {
-
-            player->stop();
-            player->play(track);
-            return {{"status", "playing"}, {"track", trackToJson(track)}};
-        }
-    }
-    return {{"status", "not_found"}};
+    return {
+        {QStringLiteral("ok"), true},
+        {QStringLiteral("state"), state},
+        {QStringLiteral("volume"), static_cast<double>(player->volume())}
+    };
 }
 
 } // namespace FooyinMCP

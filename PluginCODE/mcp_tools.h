@@ -1,10 +1,10 @@
 #pragma once
 
 #include <QObject>
+#include <QMap>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <functional>
-#include <map>
 
 namespace FooyinMCP {
 
@@ -19,12 +19,15 @@ public:
     QJsonObject callTool(const QString& name, const QJsonObject& arguments);
 
 private:
-    FooyinWrapper* m_wrapper;
-
-    using ToolHandler = std::function<QJsonObject(const QJsonObject&)>;
-    std::map<QString, ToolHandler> m_handlers;
+    struct Tool {
+        QString description;
+        QJsonObject inputSchema;
+        std::function<QJsonObject(const QJsonObject&)> handler;
+    };
 
     void registerTools();
+    FooyinWrapper* m_wrapper;
+    QMap<QString, Tool> m_tools;
 };
 
 } // namespace FooyinMCP

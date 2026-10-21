@@ -2,11 +2,8 @@
 
 #include <QObject>
 #include <QJsonObject>
-#include <QJsonArray>
-#include <core/plugins/coreplugincontext.h>
-#include <core/track.h>
-
-#include <core/playercontroller.h>
+#include <core/plugins/coreplugin.h>
+#include <core/player/playercontroller.h>
 
 namespace FooyinMCP {
 
@@ -15,35 +12,31 @@ class FooyinWrapper : public QObject {
 public:
     explicit FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* parent = nullptr);
 
-Q_SIGNALS:
+    // Playback
+    QJsonObject play();
+    QJsonObject pause();
+    QJsonObject stop();
+    QJsonObject next();
+    QJsonObject previous();
+    QJsonObject setVolume(float volume);
+
+    // Library / Playlists
+    QJsonObject addTrack(const QString& path);
+    QJsonObject enqueue(const QString& path);
+    QJsonObject scanLibrary();
+
+    // Info
+    QJsonObject getNowPlaying();
+    QJsonObject getPlaybackState();
+
+signals:
     void nowPlayingChanged(const QJsonObject& track);
     void playbackStateChanged(Fooyin::PlayState state);
     void volumeChanged(float volume);
 
-public:
-    // A. Playback Engine Control
-    QJsonObject controlPlayback(const QString& action, const QJsonObject& params);
-    QJsonObject getNowPlaying();
-    QJsonObject setVolumeAndMode(const QJsonObject& params);
-    QJsonObject smartPlay(const QString& query);
-
-    // B. Library & Search
-    QJsonObject searchLibrary(const QString& query);
-    QJsonObject getLibraryInfo();
-    QJsonObject scanLibrary();
-
-    // C. Playlists & Queue
-    QJsonObject getPlaylists();
-    QJsonObject createPlaylist(const QString& name);
-    QJsonObject modifyPlaylist(const QString& action, const QJsonObject& params);
-    QJsonObject manageQueue(const QString& action, const QJsonObject& params);
-
-    // D. Metadata & Ratings
-    QJsonObject setTrackRating(const QJsonObject& params);
-
 private:
-    const Fooyin::CorePluginContext& m_context;
     QJsonObject trackToJson(const Fooyin::Track& track);
+    Fooyin::CorePluginContext m_context;
 };
 
 } // namespace FooyinMCP

@@ -1,5 +1,6 @@
 #include "mcp_tools.h"
 #include "fooyin_wrapper.h"
+#include <QJsonDocument>
 
 namespace FooyinMCP {
 
@@ -8,125 +9,109 @@ McpTools::McpTools(FooyinWrapper* wrapper, QObject* parent)
     registerTools();
 }
 
-void McpTools::registerTools() {
-    m_handlers["control_playback"] = [this](const QJsonObject& args) {
-        return m_wrapper->controlPlayback(args.value("action").toString(), args);
-    };
-
-    m_handlers["get_now_playing"] = [this](const QJsonObject&) {
-        return m_wrapper->getNowPlaying();
-    };
-
-    m_handlers["search_library"] = [this](const QJsonObject& args) {
-        return m_wrapper->searchLibrary(args.value("query").toString());
-    };
-
-    m_handlers["get_library_info"] = [this](const QJsonObject&) {
-        return m_wrapper->getLibraryInfo();
-    };
-
-    m_handlers["scan_library"] = [this](const QJsonObject&) {
-        return m_wrapper->scanLibrary();
-    };
-
-    m_handlers["create_playlist"] = [this](const QJsonObject& args) {
-        return m_wrapper->createPlaylist(args.value("name").toString());
-    };
-
-    m_handlers["get_playlists"] = [this](const QJsonObject&) {
-        return m_wrapper->getPlaylists();
-    };
-
-    m_handlers["modify_playlist"] = [this](const QJsonObject& args) {
-        return m_wrapper->modifyPlaylist(args.value("action").toString(), args);
-    };
-
-    m_handlers["set_volume_mode"] = [this](const QJsonObject& args) {
-        return m_wrapper->setVolumeAndMode(args);
-    };
-
-    m_handlers["manage_queue"] = [this](const QJsonObject& args) {
-        return m_wrapper->manageQueue(args.value("action").toString(), args);
-    };
-
-    m_handlers["smart_play"] = [this](const QJsonObject& args) {
-        return m_wrapper->smartPlay(args.value("query").toString());
-    };
-}
-
 QJsonArray McpTools::getToolDefinitions() const {
     QJsonArray tools;
-
-    // 1. Playback
-    QJsonObject playback;
-    playback["name"] = "control_playback";
-    playback["description"] = "Control playback (play, pause, stop, next, prev, seek)";
-    QJsonObject pbProps;
-    pbProps["action"] = QJsonObject{{"type", "string"}, {"enum", QJsonArray{"play", "pause", "stop", "playPause", "next", "previous", "seek"}}};
-    pbProps["positionMs"] = QJsonObject{{"type", "number"}};
-    playback["inputSchema"] = QJsonObject{{"type", "object"}, {"properties", pbProps}, {"required", QJsonArray{"action"}}};
-    tools.append(playback);
-
-    // 2. Now Playing
-    tools.append(QJsonObject{{"name", "get_now_playing"}, {"description", "Get current track metadata and state"}});
-
-    // 3. Search Library
-    QJsonObject search;
-    search["name"] = "search_library";
-    search["description"] = "Search the music library";
-    search["inputSchema"] = QJsonObject{{"type", "object"}, {"properties", QJsonObject{{"query", QJsonObject{{"type", "string"}}}}}, {"required", QJsonArray{"query"}}};
-    tools.append(search);
-
-    // 4. Playlists
-    tools.append(QJsonObject{{"name", "get_playlists"}, {"description", "List all playlists"}});
-
-    QJsonObject modPl;
-    modPl["name"] = "modify_playlist";
-    modPl["description"] = "Add or remove tracks from a playlist";
-    QJsonObject modProps;
-    modProps["action"] = QJsonObject{{"type", "string"}, {"enum", QJsonArray{"addTrack", "removeTrack"}}};
-    modProps["playlistIndex"] = QJsonObject{{"type", "integer"}};
-    modProps["path"] = QJsonObject{{"type", "string"}, {"description", "File path for addTrack"}};
-    modProps["row"] = QJsonObject{{"type", "integer"}, {"description", "Row index for removeTrack"}};
-    modPl["inputSchema"] = QJsonObject{{"type", "object"}, {"properties", modProps}, {"required", QJsonArray{"action", "playlistIndex"}}};
-    tools.append(modPl);
-
-    // 5. Volume
-    QJsonObject vol;
-    vol["name"] = "set_volume_mode";
-    vol["description"] = "Set volume (0.0 to 1.0) and shuffle/repeat modes";
-    vol["inputSchema"] = QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-        {"volume", QJsonObject{{"type", "number"}}},
-        {"shuffle", QJsonObject{{"type", "boolean"}}}
-    }}};
-    tools.append(vol);
-
-    // 6. Queue Management
-    QJsonObject queue;
-    queue["name"] = "manage_queue";
-    queue["description"] = "Manage the playback queue (add tracks to play next or clear queue)";
-    QJsonObject qProps;
-    qProps["action"] = QJsonObject{{"type", "string"}, {"enum", QJsonArray{"enqueue", "clear"}}};
-    qProps["path"] = QJsonObject{{"type", "string"}, {"description", "Full file path of the track to enqueue"}};
-    queue["inputSchema"] = QJsonObject{{"type", "object"}, {"properties", qProps}, {"required", QJsonArray{"action"}}};
-    tools.append(queue);
-
-    // 7. Smart Play
-    QJsonObject smart;
-    smart["name"] = "smart_play";
-    smart["description"] = "Search for a track and play it immediately (best match)";
-    smart["inputSchema"] = QJsonObject{{"type", "object"}, {"properties", QJsonObject{{"query", QJsonObject{{"type", "string"}}}}}, {"required", QJsonArray{"query"}}};
-    tools.append(smart);
-
+    for (auto it = m_tools.begin(); it != m_tools.end(); ++it) {
+        QJsonObject tool;
+        tool[QStringLiteral("name")] = it.key();
+        tool[QStringLiteral("description")] = it.value().description;
+        tool[QStringLiteral("inputSchema")] = it.value().inputSchema;
+        tools.append(tool);
+    }
     return tools;
 }
 
 QJsonObject McpTools::callTool(const QString& name, const QJsonObject& arguments) {
-    auto it = m_handlers.find(name);
-    if (it != m_handlers.end()) {
-        return it->second(arguments);
+    if (!m_tools.contains(name)) {
+        return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Tool not found")}};
     }
-    return {{"error", "Tool not found"}};
+
+    QJsonObject result = m_tools[name].handler(arguments);
+
+    // Ensure that if the wrapper says "ok: false", we mark it as "isError" for the MCP server
+    if (result.contains(QStringLiteral("ok")) && !result.value(QStringLiteral("ok")).toBool()) {
+        result[QStringLiteral("isError")] = true;
+    }
+
+    return result;
+}
+
+void McpTools::registerTools() {
+    auto addTool = [this](const QString& name, const QString& desc, const QJsonObject& schema, std::function<QJsonObject(const QJsonObject&)> handler) {
+        m_tools.insert(name, {desc, schema, handler});
+    };
+
+    // Helper for empty schemas
+    auto emptySchema = []() {
+        return QJsonObject{{QStringLiteral("type"), QStringLiteral("object")}, {QStringLiteral("additionalProperties"), false}};
+    };
+
+    // --- PLAYBACK ---
+    addTool(QStringLiteral("play"), QStringLiteral("Starts playback"), emptySchema(),
+            [this](const QJsonObject&) { return m_wrapper->play(); });
+
+    addTool(QStringLiteral("pause"), QStringLiteral("Pauses playback"), emptySchema(),
+            [this](const QJsonObject&) { return m_wrapper->pause(); });
+
+    addTool(QStringLiteral("stop"), QStringLiteral("Stops playback"), emptySchema(),
+            [this](const QJsonObject&) { return m_wrapper->stop(); });
+
+    addTool(QStringLiteral("next"), QStringLiteral("Next track"), emptySchema(),
+            [this](const QJsonObject&) { return m_wrapper->next(); });
+
+    addTool(QStringLiteral("previous"), QStringLiteral("Previous track"), emptySchema(),
+            [this](const QJsonObject&) { return m_wrapper->previous(); });
+
+    // --- VOLUME ---
+    addTool(QStringLiteral("setVolume"), QStringLiteral("Sets volume (0.0 to 1.0)"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("volume"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("number")},
+                        {QStringLiteral("minimum"), 0},
+                        {QStringLiteral("maximum"), 1}
+                    }}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("volume")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) {
+                return m_wrapper->setVolume(static_cast<float>(args.value(QStringLiteral("volume")).toDouble()));
+            });
+
+    // --- PLAYLIST / QUEUE ---
+    addTool(QStringLiteral("addTrack"), QStringLiteral("Adds a file path to the current playlist"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("path"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("path")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) { return m_wrapper->addTrack(args.value(QStringLiteral("path")).toString()); });
+
+    addTool(QStringLiteral("enqueue"), QStringLiteral("Enqueues a file path"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("path"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("path")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) { return m_wrapper->enqueue(args.value(QStringLiteral("path")).toString()); });
+
+    // --- INFO / STATE ---
+    addTool(QStringLiteral("getNowPlaying"), QStringLiteral("Returns currently playing track info"), emptySchema(),
+            [this](const QJsonObject&) { return m_wrapper->getNowPlaying(); });
+
+    addTool(QStringLiteral("getPlaybackState"), QStringLiteral("Returns current playback state and volume"), emptySchema(),
+            [this](const QJsonObject&) { return m_wrapper->getPlaybackState(); });
+
+    addTool(QStringLiteral("scanLibrary"), QStringLiteral("Triggers a library scan"), emptySchema(),
+            [this](const QJsonObject&) { return m_wrapper->scanLibrary(); });
 }
 
 } // namespace FooyinMCP

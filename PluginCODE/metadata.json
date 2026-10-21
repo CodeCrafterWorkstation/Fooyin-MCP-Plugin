@@ -1,7 +1,7 @@
 {
   "Name": "Fooyin MCP Bridge Plugin",
-  "Version": "0.1.0",
-  "Author": "Dein Name",
-  "Description": "Ein plattformübergreifendes C++ Plugin zur Steuerung von fooyin via Socket für MCP.",
+  "Version": "1.2.1",
+  "Author": "slu",
+  "Description": "High-performance C++20/Qt6 MCP Plugin for Fooyin Audio Player with real-time push notifications and secure JSON-RPC 2.0 interface.",
   "License": "GPL-3.0-or-later"
 }

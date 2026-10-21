@@ -1,10 +1,12 @@
-#include "mcp_plugin.h" // For lcMcp category
+#include "mcp_server.h"
+#include "mcp_logging.h"
 #include <QJsonDocument>
 #include <QJsonArray>
-#include <QDebug>
 #include <QLocalSocket>
 #include <QMetaObject>
 #include <QThread>
+#include <QUrl>
+#include <utility>
 
 namespace FooyinMCP {
 
@@ -17,8 +19,12 @@ McpServer::McpServer(FooyinWrapper* wrapper, QObject* parent)
       m_wrapper(wrapper),
       m_tools(std::make_unique<McpTools>(wrapper, this)) {
 
+    m_localServer->setSocketOptions(QLocalServer::UserAccessOption);
+    m_webSocketServer->setMaxAllowedIncomingMessageSize(MAX_MESSAGE_SIZE);
+
     connect(m_localServer, &QLocalServer::newConnection, this, &McpServer::onNewLocalConnection);
     connect(m_webSocketServer, &QWebSocketServer::newConnection, this, &McpServer::onNewWebSocketConnection);
+    connect(m_webSocketServer, &QWebSocketServer::originAuthenticationRequired, this, &McpServer::onOriginAuthenticationRequired);
 }
 
 bool McpServer::start(const QString& pipeName, quint16 wsPort) {
@@ -27,12 +33,13 @@ bool McpServer::start(const QString& pipeName, quint16 wsPort) {
 
     QLocalServer::removeServer(m_pipeName);
     bool localOk = m_localServer->listen(m_pipeName);
-
-    // SECURITY: Only listen on LocalHost to prevent unauthorized network access
     bool wsOk = m_webSocketServer->listen(QHostAddress::LocalHost, m_port);
 
     if (localOk) qCDebug(lcMcp) << "Pipe listening on" << m_pipeName;
+    else qCCritical(lcMcp) << "Pipe error:" << m_localServer->errorString();
+
     if (wsOk) qCDebug(lcMcp) << "WebSocket listening on localhost:" << m_port;
+    else qCCritical(lcMcp) << "WS error:" << m_webSocketServer->errorString();
 
     return localOk || wsOk;
 }
@@ -41,23 +48,22 @@ void McpServer::stop() {
     m_localServer->close();
     m_webSocketServer->close();
 
-    for(auto* s : m_localClients) {
-        s->disconnect();
-        s->close();
+    auto localClients = std::move(m_localClients);
+    for(auto* s : localClients) {
+        s->disconnect(this);
+        s->abort();
+        s->deleteLater();
     }
-    qDeleteAll(m_localClients);
-    m_localClients.clear();
 
-    for(auto* ws : m_webSocketClients) {
-        ws->disconnect();
+    auto wsClients = std::move(m_webSocketClients);
+    for(auto* ws : wsClients) {
+        ws->disconnect(this);
         ws->close();
+        ws->deleteLater();
     }
-    qDeleteAll(m_webSocketClients);
-    m_webSocketClients.clear();
 }
 
 void McpServer::broadcastNotification(const QString& method, const QJsonObject& params) {
-    // Ensure thread-safety: if called from a different thread, invoke on this object's thread
     if (thread() != QThread::currentThread()) {
         QMetaObject::invokeMethod(this, [this, method, params] {
             broadcastNotification(method, params);
@@ -66,31 +72,34 @@ void McpServer::broadcastNotification(const QString& method, const QJsonObject& 
     }
 
     QJsonObject notification;
-    notification["jsonrpc"] = "2.0";
-    notification["method"] = method;
-    notification["params"] = params;
+    notification[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+    notification[QStringLiteral("method")] = method;
+    notification[QStringLiteral("params")] = params;
 
     QByteArray data = QJsonDocument(notification).toJson(QJsonDocument::Compact) + "\n";
-
     for (auto* socket : m_localClients) {
-        if (socket->state() == QLocalSocket::ConnectedState) {
-            socket->write(data);
-        }
+        if (socket->state() == QLocalSocket::ConnectedState) socket->write(data);
     }
 
     QString wsData = QString::fromUtf8(data).trimmed();
     for (auto* ws : m_webSocketClients) {
-        ws->sendTextMessage(wsData);
+        if (ws->state() == QAbstractSocket::ConnectedState) ws->sendTextMessage(wsData);
     }
 }
 
 void McpServer::onNewLocalConnection() {
-    QLocalSocket* socket = m_localServer->nextPendingConnection();
-    if (!socket) return;
-
-    m_localClients << socket;
-    connect(socket, &QLocalSocket::readyRead, this, &McpServer::onLocalReadyRead);
-    connect(socket, &QLocalSocket::disconnected, this, &McpServer::onLocalDisconnected);
+    if (m_localClients.size() >= MAX_CONNECTIONS) {
+        if (auto* s = m_localServer->nextPendingConnection()) {
+            s->abort();
+            s->deleteLater();
+        }
+        return;
+    }
+    if (auto* socket = m_localServer->nextPendingConnection()) {
+        m_localClients << socket;
+        connect(socket, &QLocalSocket::readyRead, this, &McpServer::onLocalReadyRead);
+        connect(socket, &QLocalSocket::disconnected, this, &McpServer::onLocalDisconnected);
+    }
 }
 
 void McpServer::onLocalReadyRead() {
@@ -98,95 +107,147 @@ void McpServer::onLocalReadyRead() {
     if (!socket) return;
 
     while (socket->canReadLine()) {
-        QByteArray data = socket->readLine();
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (doc.isObject()) {
-            handleRequest(socket, nullptr, doc.object());
+        QByteArray data = socket->readLine(MAX_MESSAGE_SIZE);
+        if (data.isEmpty()) continue;
+
+        if (!data.endsWith('\n')) {
+             qCWarning(lcMcp) << "Protocol Error: Unterminated line, closing pipe.";
+             socket->abort();
+             return;
         }
+
+        QJsonParseError err;
+        QJsonDocument doc = QJsonDocument::fromJson(data, &err);
+        if (err.error != QJsonParseError::NoError) {
+            sendError(socket, nullptr, QJsonValue::Null, -32700, err.errorString());
+            continue;
+        }
+        if (doc.isObject()) handleRequest(socket, nullptr, doc.object());
+        else sendError(socket, nullptr, QJsonValue::Null, -32600, QStringLiteral("Invalid Request"));
+    }
+
+    // Fix DoS: prevent buffer from growing indefinitely if no newline is received
+    if (socket->bytesAvailable() > MAX_MESSAGE_SIZE) {
+        qCWarning(lcMcp) << "DoS: Line buffer exceeded limit without newline. Aborting.";
+        socket->abort();
     }
 }
 
 void McpServer::onLocalDisconnected() {
-    auto* socket = qobject_cast<QLocalSocket*>(sender());
-    if (socket) {
+    if (auto* socket = qobject_cast<QLocalSocket*>(sender())) {
         m_localClients.removeAll(socket);
         socket->deleteLater();
     }
 }
 
 void McpServer::onNewWebSocketConnection() {
-    QWebSocket* socket = m_webSocketServer->nextPendingConnection();
-    if (!socket) return;
-
-    // SECURITY: Origin Check to prevent Cross-Site WebSocket Hijacking (CSWH)
-    // Most MCP clients don't send an Origin. Browsers do.
-    QString origin = socket->origin();
-    if (!origin.isEmpty() && !origin.startsWith(QStringLiteral("http://localhost")) && !origin.startsWith(QStringLiteral("http://127.0.0.1"))) {
-        qCCritical(lcMcp) << "MCP Security: Rejecting WebSocket connection from unauthorized origin:" << origin;
-        socket->abort();
-        socket->deleteLater();
-        return;
+    if (auto* socket = m_webSocketServer->nextPendingConnection()) {
+        if (m_webSocketClients.size() >= MAX_CONNECTIONS || !isAllowedOrigin(socket->origin())) {
+            socket->abort();
+            socket->deleteLater();
+            return;
+        }
+        m_webSocketClients << socket;
+        connect(socket, &QWebSocket::textMessageReceived, this, &McpServer::onWebSocketMessageReceived);
+        connect(socket, &QWebSocket::disconnected, this, &McpServer::onWebSocketDisconnected);
     }
+}
 
-    m_webSocketClients << socket;
-    connect(socket, &QWebSocket::textMessageReceived, this, &McpServer::onWebSocketMessageReceived);
-    connect(socket, &QWebSocket::disconnected, this, &McpServer::onWebSocketDisconnected);
+void McpServer::onOriginAuthenticationRequired(QWebSocketCorsAuthenticator* authenticator) {
+    authenticator->setAllowed(isAllowedOrigin(authenticator->origin()));
+}
+
+bool McpServer::isAllowedOrigin(const QString& origin) {
+    // Allow empty origin for non-browser clients (CLI tools, etc.)
+    if (origin.isEmpty()) return true;
+
+    QUrl url(origin);
+    QString host = url.host().toLower();
+    if (host.startsWith('[') && host.endsWith(']')) host = host.mid(1, host.length() - 2);
+
+    return host == QStringLiteral("localhost") || host == QStringLiteral("127.0.0.1") || host == QStringLiteral("::1");
 }
 
 void McpServer::onWebSocketMessageReceived(const QString& message) {
     auto* socket = qobject_cast<QWebSocket*>(sender());
     if (!socket) return;
-
-    QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8());
-    if (doc.isObject()) {
-        handleRequest(nullptr, socket, doc.object());
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError) {
+        sendError(nullptr, socket, QJsonValue::Null, -32700, err.errorString());
+        return;
     }
+    if (doc.isObject()) handleRequest(nullptr, socket, doc.object());
+    else sendError(nullptr, socket, QJsonValue::Null, -32600, QStringLiteral("Invalid Request"));
 }
 
 void McpServer::onWebSocketDisconnected() {
-    auto* socket = qobject_cast<QWebSocket*>(sender());
-    if (socket) {
+    if (auto* socket = qobject_cast<QWebSocket*>(sender())) {
         m_webSocketClients.removeAll(socket);
         socket->deleteLater();
     }
 }
 
 void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJsonObject& request) {
-    QString method = request.value("method").toString();
-    QJsonValue id = request.value("id");
-    QJsonObject params = request.value("params").toObject();
+    QJsonValue id = request.value(QStringLiteral("id"));
+    const bool isNotification = !request.contains(QStringLiteral("id"));
 
-    if (method == "initialize") {
+    // Validate ID type if present
+    if (!isNotification && !id.isString() && !id.isDouble() && !id.isNull()) {
+        sendError(device, webSocket, QJsonValue::Null, -32600, QStringLiteral("Invalid ID type"));
+        return;
+    }
+
+    if (request.value(QStringLiteral("jsonrpc")).toString() != QStringLiteral("2.0")) {
+        if (!isNotification) sendError(device, webSocket, id, -32600, QStringLiteral("Invalid JSON-RPC version"));
+        return;
+    }
+
+    QString method = request.value(QStringLiteral("method")).toString();
+    QJsonObject params = request.value(QStringLiteral("params")).toObject();
+
+    if (method == QStringLiteral("initialize")) {
+        if (isNotification) return;
         QJsonObject result;
-        result["protocolVersion"] = "2024-11-05";
-        QJsonObject capabilities;
-        capabilities["tools"] = QJsonObject();
-        result["capabilities"] = capabilities;
-        result["serverInfo"] = QJsonObject{{"name", "fooyin-mcp-plugin"}, {"version", "1.2.0"}};
+        result[QStringLiteral("protocolVersion")] = QStringLiteral("2024-11-05");
+        result[QStringLiteral("capabilities")] = QJsonObject{{QStringLiteral("tools"), QJsonObject{{QStringLiteral("listChanged"), false}}}};
+        result[QStringLiteral("serverInfo")] = QJsonObject{{QStringLiteral("name"), QStringLiteral("fooyin-mcp-plugin")}, {QStringLiteral("version"), QStringLiteral("1.2.1")}};
         sendResponse(device, webSocket, id, result);
     }
-    else if (method == "tools/list") {
-        sendResponse(device, webSocket, id, {{"tools", m_tools->getToolDefinitions()}});
+    else if (method == QStringLiteral("ping")) {
+        if (!isNotification) sendResponse(device, webSocket, id, QJsonObject());
     }
-    else if (method == "tools/call") {
-        QString toolName = params.value("name").toString();
-        QJsonObject toolArgs = params.value("arguments").toObject();
-        QJsonObject toolResult = m_tools->callTool(toolName, toolArgs);
+    else if (method == QStringLiteral("tools/list")) {
+        if (!isNotification) sendResponse(device, webSocket, id, {{QStringLiteral("tools"), m_tools->getToolDefinitions()}});
+    }
+    else if (method == QStringLiteral("tools/call")) {
+        if (isNotification) return;
+        QJsonObject toolResult = m_tools->callTool(params.value(QStringLiteral("name")).toString(), params.value(QStringLiteral("arguments")).toObject());
 
-        QJsonArray content;
-        content.append(QJsonObject{{"type", "text"}, {"text", QJsonDocument(toolResult).toJson(QJsonDocument::Indented)}});
-        sendResponse(device, webSocket, id, {{"content", content}});
+        if (toolResult.value(QStringLiteral("isError")).toBool()) {
+            QJsonObject errorData;
+            errorData[QStringLiteral("content")] = QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("text")}, {QStringLiteral("text"), toolResult.value(QStringLiteral("error")).toString()}}};
+            errorData[QStringLiteral("isError")] = true;
+            sendResponse(device, webSocket, id, errorData);
+            return;
+        }
+
+        QJsonObject responseObj;
+        responseObj[QStringLiteral("content")] = QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("text")}, {QStringLiteral("text"), QJsonDocument(toolResult).toJson(QJsonDocument::Compact)}}};
+        sendResponse(device, webSocket, id, responseObj);
     }
-    else {
-        sendError(device, webSocket, id, -32601, "Method not found: " + method);
+    else if (!isNotification) {
+        sendError(device, webSocket, id, -32601, QStringLiteral("Method not found"));
     }
 }
 
 void McpServer::sendResponse(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, const QJsonObject& result) {
+    if (!id.isString() && !id.isDouble() && !id.isNull()) return;
+
     QJsonObject response;
-    response["jsonrpc"] = "2.0";
-    response["id"] = id;
-    response["result"] = result;
+    response[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+    response[QStringLiteral("id")] = id;
+    response[QStringLiteral("result")] = result;
 
     QByteArray data = QJsonDocument(response).toJson(QJsonDocument::Compact);
     if (device) device->write(data + "\n");
@@ -195,9 +256,9 @@ void McpServer::sendResponse(QIODevice* device, QWebSocket* webSocket, const QJs
 
 void McpServer::sendError(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, int code, const QString& message) {
     QJsonObject response;
-    response["jsonrpc"] = "2.0";
-    response["id"] = id;
-    response["error"] = QJsonObject{{"code", code}, {"message", message}};
+    response[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+    response[QStringLiteral("id")] = id;
+    response[QStringLiteral("error")] = QJsonObject{{QStringLiteral("code"), code}, {QStringLiteral("message"), message}};
 
     QByteArray data = QJsonDocument(response).toJson(QJsonDocument::Compact);
     if (device) device->write(data + "\n");

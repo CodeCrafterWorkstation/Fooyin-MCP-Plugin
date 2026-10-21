@@ -5,15 +5,12 @@
 #include <QObject>
 #include <QLoggingCategory>
 #include <memory>
+#include "mcp_logging.h"
 
 namespace FooyinMCP {
 
-Q_DECLARE_LOGGING_CATEGORY(lcMcp);
-
 class McpServer;
 class FooyinWrapper;
-
-} // namespace FooyinMCP
 
 class McpPlugin : public QObject, public Fooyin::Plugin, public Fooyin::CorePlugin {
     Q_OBJECT
@@ -31,6 +28,8 @@ public:
     void shutdown() override;
 
 private:
-    std::unique_ptr<FooyinMCP::FooyinWrapper> m_wrapper;
-    std::unique_ptr<FooyinMCP::McpServer> m_server;
+    std::unique_ptr<FooyinWrapper> m_wrapper;
+    std::unique_ptr<McpServer> m_server;
 };
+
+} // namespace FooyinMCP
