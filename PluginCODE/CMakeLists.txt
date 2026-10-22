@@ -17,6 +17,14 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Network WebSockets Sql)
 add_library(fooyin_mcp_plugin SHARED
     fooyin_wrapper.cpp
     fooyin_wrapper.h
+    mcp_plugin.cpp
+    mcp_plugin.h
+    mcp_server.cpp
+    mcp_server.h
+    mcp_tools.cpp
+    mcp_tools.h
+    mcp_logging.cpp
+    mcp_logging.h
 )
 
 target_include_directories(fooyin_mcp_plugin PRIVATE
