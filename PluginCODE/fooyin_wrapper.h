@@ -24,6 +24,7 @@ public:
     // Playlist & Library Operations
     QJsonObject addTrack(const QString& path);
     QJsonObject enqueue(const QString& path);
+    QJsonObject createPlaylist(const QString& name);
     QJsonObject scanLibrary();
 
     // Player Status

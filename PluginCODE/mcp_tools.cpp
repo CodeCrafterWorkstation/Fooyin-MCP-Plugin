@@ -103,6 +103,17 @@ void McpTools::registerTools() {
             },
             [this](const QJsonObject& args) { return m_wrapper->enqueue(args.value(QStringLiteral("path")).toString()); });
 
+    addTool(QStringLiteral("createPlaylist"), QStringLiteral("Creates a new playlist with the given name"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("name"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("name")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) { return m_wrapper->createPlaylist(args.value(QStringLiteral("name")).toString()); });
+
     // --- INFO / STATE ---
     addTool(QStringLiteral("getNowPlaying"), QStringLiteral("Returns currently playing track info"), emptySchema(),
             [this](const QJsonObject&) { return m_wrapper->getNowPlaying(); });

@@ -102,6 +102,14 @@ QJsonObject FooyinWrapper::addTrack(const QString& path) {
     return QJsonObject{{QStringLiteral("ok"), true}};
 }
 
+QJsonObject FooyinWrapper::createPlaylist(const QString& name) {
+    if (!m_context.playlistHandler)
+        return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("PlaylistHandler not available")}};
+
+    m_context.playlistHandler->createPlaylist(name);
+    return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("name"), name}};
+}
+
 QJsonObject FooyinWrapper::enqueue(const QString& path) {
     if (!m_context.playlistHandler)
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("PlaylistHandler not available")}};
