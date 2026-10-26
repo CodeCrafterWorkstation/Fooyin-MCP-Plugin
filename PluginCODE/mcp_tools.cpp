@@ -109,16 +109,22 @@ void McpTools::registerTools() {
             });
 
     // --- PLAYLIST / QUEUE ---
-    addTool(QStringLiteral("addTrack"), QStringLiteral("Adds a file path to the current playlist"),
+    addTool(QStringLiteral("addTrack"), QStringLiteral("Adds a file path to a playlist"),
             QJsonObject{
                 {QStringLiteral("type"), QStringLiteral("object")},
                 {QStringLiteral("properties"), QJsonObject{
-                    {QStringLiteral("path"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                    {QStringLiteral("path"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}},
+                    {QStringLiteral("playlist"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
                 }},
                 {QStringLiteral("required"), QJsonArray{QStringLiteral("path")}},
                 {QStringLiteral("additionalProperties"), false}
             },
-            [this](const QJsonObject& args) { return m_wrapper->addTrack(args.value(QStringLiteral("path")).toString()); });
+            [this](const QJsonObject& args) {
+                return m_wrapper->addTrack(
+                    args.value(QStringLiteral("path")).toString(),
+                    args.value(QStringLiteral("playlist")).toString()
+                );
+            });
 
     addTool(QStringLiteral("enqueue"), QStringLiteral("Enqueues a file path"),
             QJsonObject{

@@ -24,7 +24,7 @@ public:
     QJsonObject setPlayMode(const QString& mode);
 
     // Playlist & Library Operations
-    QJsonObject addTrack(const QString& path);
+    QJsonObject addTrack(const QString& path, const QString& playlistName = QString());
     QJsonObject enqueue(const QString& path);
     QJsonObject createPlaylist(const QString& name);
     QJsonObject listPlaylists();

@@ -101,7 +101,7 @@ QJsonObject FooyinWrapper::setPlayMode(const QString& mode) {
     return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("mode"), mode}};
 }
 
-QJsonObject FooyinWrapper::addTrack(const QString& path) {
+QJsonObject FooyinWrapper::addTrack(const QString& path, const QString& playlistName) {
     if (!m_context.playlistHandler) 
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Playlist handler not available")}};
 
@@ -115,7 +115,13 @@ QJsonObject FooyinWrapper::addTrack(const QString& path) {
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Invalid track file")}};
     }
 
-    auto* pl = m_context.playlistHandler->activePlaylist();
+    auto* pl = playlistName.isEmpty() ? m_context.playlistHandler->activePlaylist()
+                                      : m_context.playlistHandler->playlistByName(playlistName);
+
+    if (!pl && !playlistName.isEmpty()) {
+        pl = m_context.playlistHandler->createPlaylist(playlistName);
+    }
+
     if (!pl) pl = m_context.playlistHandler->playlistByName(QStringLiteral("MCP Playlist"));
     if (!pl) pl = m_context.playlistHandler->createPlaylist(QStringLiteral("MCP Playlist"));
 
