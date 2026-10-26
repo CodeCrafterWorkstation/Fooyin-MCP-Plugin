@@ -62,6 +62,34 @@ void McpTools::registerTools() {
     addTool(QStringLiteral("previous"), QStringLiteral("Previous track"), emptySchema(),
             [this](const QJsonObject&) { return m_wrapper->previous(); });
 
+    addTool(QStringLiteral("seek"), QStringLiteral("Seek to position in ms"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("position"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("integer")},
+                        {QStringLiteral("minimum"), 0}
+                    }}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("position")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) { return m_wrapper->seek(args.value(QStringLiteral("position")).toVariant().toULongLong()); });
+
+    addTool(QStringLiteral("setPlayMode"), QStringLiteral("Set play mode (default, shuffle, repeatTrack, repeatPlaylist)"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("mode"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("string")},
+                        {QStringLiteral("enum"), QJsonArray{QStringLiteral("default"), QStringLiteral("shuffle"), QStringLiteral("repeatTrack"), QStringLiteral("repeatPlaylist")}}
+                    }}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("mode")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) { return m_wrapper->setPlayMode(args.value(QStringLiteral("mode")).toString()); });
+
     // --- VOLUME ---
     addTool(QStringLiteral("setVolume"), QStringLiteral("Sets volume (0.0 to 1.0)"),
             QJsonObject{
@@ -113,6 +141,42 @@ void McpTools::registerTools() {
                 {QStringLiteral("additionalProperties"), false}
             },
             [this](const QJsonObject& args) { return m_wrapper->createPlaylist(args.value(QStringLiteral("name")).toString()); });
+
+    addTool(QStringLiteral("listPlaylists"), QStringLiteral("List all playlists"), emptySchema(),
+            [this](const QJsonObject&) { return m_wrapper->listPlaylists(); });
+
+    addTool(QStringLiteral("getPlaylistTracks"), QStringLiteral("Get tracks in a playlist"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("name"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("name")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) { return m_wrapper->getPlaylistTracks(args.value(QStringLiteral("name")).toString()); });
+
+    addTool(QStringLiteral("removePlaylist"), QStringLiteral("Remove a playlist"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("name"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("name")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) { return m_wrapper->removePlaylist(args.value(QStringLiteral("name")).toString()); });
+
+    addTool(QStringLiteral("searchLibrary"), QStringLiteral("Search in library"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("query"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("query")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) { return m_wrapper->searchLibrary(args.value(QStringLiteral("query")).toString()); });
 
     // --- INFO / STATE ---
     addTool(QStringLiteral("getNowPlaying"), QStringLiteral("Returns currently playing track info"), emptySchema(),
