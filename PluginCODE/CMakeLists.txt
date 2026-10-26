@@ -9,7 +9,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-set(FOOYIN_SRC_DIR "C:/Users/slu/AndroidStudioProjects/fooyin-src")
+set(FOOYIN_SRC_DIR "X:/fooyin")
 set(FOOYIN_BUILD_DIR "${FOOYIN_SRC_DIR}/build")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network WebSockets Sql)
