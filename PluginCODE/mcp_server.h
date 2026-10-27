@@ -27,13 +27,14 @@ public:
 
     explicit McpServer(FooyinWrapper* wrapper, QObject* parent = nullptr);
 
-    bool start(const QString& pipeName = DEFAULT_PIPE_NAME, quint16 wsPort = DEFAULT_WS_PORT);
+    bool start(const QString& pipeName = DEFAULT_PIPE_NAME, quint16 wsPort = DEFAULT_WS_PORT, const QString& token = QString());
     void stop();
 
     void broadcastNotification(const QString& method, const QJsonObject& params);
 
     QString pipeName() const { return m_pipeName; }
     quint16 port() const { return m_port; }
+    QString token() const { return m_token; }
 
 private slots:
     void onNewLocalConnection();
@@ -51,13 +52,19 @@ private:
         Fooyin::ScriptSubscription* scriptSub = nullptr;
     };
 
-    void handleRequest(QIODevice* device, QWebSocket* webSocket, const QJsonObject& request);
+    struct ClientState {
+        bool authenticated = false;
+        QByteArray buffer;
+    };
+
+    void handleRequest(QObject* client, QIODevice* device, QWebSocket* webSocket, const QJsonObject& request);
     void sendResponse(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, const QJsonObject& result);
     void sendError(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, int code, const QString& message);
     bool isAllowedOrigin(const QString& origin);
     void setupScriptSubscription(QObject* client, Subscription& sub, QIODevice* device, QWebSocket* webSocket);
 
     QMap<QObject*, QList<Subscription>> m_subscriptions;
+    QMap<QObject*, ClientState> m_clientStates;
 
     QLocalServer* m_localServer;
     QList<QLocalSocket*> m_localClients;
@@ -67,6 +74,7 @@ private:
 
     QString m_pipeName;
     quint16 m_port;
+    QString m_token;
 
     FooyinWrapper* m_wrapper;
     std::unique_ptr<McpTools> m_tools;

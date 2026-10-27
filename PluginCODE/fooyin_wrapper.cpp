@@ -23,6 +23,10 @@ FooyinWrapper::FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* 
             emit nowPlayingChanged(trackToJson(track));
             emit playbackStateChanged(getPlaybackState().value(QStringLiteral("state")).toString());
         });
+
+        connect(player, &Fooyin::PlayerController::playbackStateChanged, this, [this]() {
+            emit playbackStateChanged(getPlaybackState().value(QStringLiteral("state")).toString());
+        });
     }
 
     /*
@@ -38,6 +42,7 @@ FooyinWrapper::FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* 
 QJsonObject FooyinWrapper::trackToJson(const Fooyin::Track& track) {
     if (!track.isValid()) return QJsonObject();
     QJsonObject obj;
+    obj[QStringLiteral("id")] = static_cast<double>(track.id());
     obj[QStringLiteral("title")] = track.title();
     obj[QStringLiteral("artist")] = track.artist();
     obj[QStringLiteral("album")] = track.album();
@@ -350,14 +355,15 @@ QJsonObject FooyinWrapper::getPlaybackState() {
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
     
     auto* player = m_context.playerController;
-    QString state = QStringLiteral("stopped");
-    if (player->currentTrack().isValid()) {
-        state = QStringLiteral("playing");
-    }
+    QString stateStr = QStringLiteral("stopped");
+    auto state = player->playbackState();
+
+    if (state == Fooyin::PlayerController::PlayingState) stateStr = QStringLiteral("playing");
+    else if (state == Fooyin::PlayerController::PausedState) stateStr = QStringLiteral("paused");
 
     return QJsonObject{
         {QStringLiteral("ok"), true},
-        {QStringLiteral("state"), state}
+        {QStringLiteral("state"), stateStr}
     };
 }
 
