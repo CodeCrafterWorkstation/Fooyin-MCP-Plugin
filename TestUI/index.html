@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fooyin MCP Plugin Test UI</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background: #f0f0f0; display: flex; flex-direction: column; height: 95vh; }
+        .container { display: flex; gap: 20px; flex: 1; min-height: 0; }
+        .controls { flex: 1; overflow-y: auto; padding-right: 10px; }
+        .log-container { flex: 1; display: flex; flex-direction: column; background: #222; color: #0f0; padding: 10px; border-radius: 5px; min-height: 0; }
+        .log { flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+        .status { padding: 5px; margin-bottom: 10px; border-radius: 3px; }
+        .connected { background: #dff0d8; color: #3c763d; }
+        .disconnected { background: #f2dede; color: #a94442; }
+        section { background: white; padding: 15px; margin-bottom: 15px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+        button { cursor: pointer; padding: 5px 10px; margin: 2px; }
+        input[type="text"], input[type="number"] { padding: 5px; margin: 2px; }
+        .now-playing { font-weight: bold; color: #0056b3; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    </style>
+</head>
+<body>
+
+<h1>Fooyin MCP Test UI</h1>
+
+<section>
+    <div id="connection-status" class="status disconnected">Status: Disconnected</div>
+    <input type="text" id="ws-url" placeholder="ws://127.0.0.1:8080/?token=..." style="width: 400px;">
+    <button onclick="connect()">Connect</button>
+    <button onclick="disconnect()">Disconnect</button>
+</section>
+
+<div class="container">
+    <div class="controls">
+        <section>
+            <h2>Playback</h2>
+            <button onclick="callTool('play')">Play</button>
+            <button onclick="callTool('pause')">Pause</button>
+            <button onclick="callTool('stop')">Stop</button>
+            <button onclick="callTool('previous')">Prev</button>
+            <button onclick="callTool('next')">Next</button>
+            <br><br>
+            Seek (ms): <input type="number" id="seek-ms" value="0"> <button onclick="callTool('seek', {position: parseInt(document.getElementById('seek-ms').value)})">Seek</button>
+            <br><br>
+            Mode:
+            <button onclick="callTool('setPlayMode', {mode: 'default'})">Default</button>
+            <button onclick="callTool('setPlayMode', {mode: 'shuffle'})">Shuffle</button>
+            <button onclick="callTool('setPlayMode', {mode: 'repeatTrack'})">Repeat Track</button>
+            <button onclick="callTool('setPlayMode', {mode: 'repeatPlaylist'})">Repeat List</button>
+        </section>
+
+        <section>
+            <h2>Status & Info</h2>
+            <button onclick="callTool('getNowPlaying')">Get Now Playing</button>
+            <button onclick="callTool('getPlaybackState')">Get State</button>
+            <button onclick="callTool('scanLibrary')">Scan Library</button>
+            <div id="playback-info" style="margin-top: 10px;">
+                State: <span id="info-state">-</span><br>
+                Track: <span id="info-track" class="now-playing">None</span>
+            </div>
+        </section>
+
+        <section>
+            <h2>Playlists</h2>
+            <button onclick="callTool('listPlaylists')">List Playlists</button>
+            <br><br>
+            <input type="text" id="pl-name" placeholder="Playlist Name">
+            <button onclick="callTool('createPlaylist', {name: document.getElementById('pl-name').value})">Create</button>
+            <button onclick="callTool('removePlaylist', {name: document.getElementById('pl-name').value})">Remove</button>
+            <button onclick="callTool('getPlaylistTracks', {name: document.getElementById('pl-name').value})">Get Tracks</button>
+            <br><br>
+            Add Track (Path): <input type="text" id="track-path" placeholder="X:/path/to/song.mp3" style="width: 200px;">
+            <button onclick="callTool('addTrack', {path: document.getElementById('track-path').value, playlist: document.getElementById('pl-name').value, createIfMissing: true})">Add to List</button>
+            <button onclick="callTool('enqueue', {path: document.getElementById('track-path').value})">Enqueue</button>
+        </section>
+
+        <section>
+            <h2>Search Library</h2>
+            <input type="text" id="search-query" placeholder="Query (e.g. artist HAS beatles)">
+            <button onclick="callTool('searchLibrary', {query: document.getElementById('search-query').value})">Search</button>
+        </section>
+
+        <section>
+            <h2>Resources</h2>
+            <button onclick="subscribe('playlists://')">Subscribe Playlists</button>
+        </section>
+    </div>
+
+    <div class="log-container">
+        <div style="display: flex; justify-content: space-between;">
+            <span>Log (JSON-RPC)</span>
+            <button onclick="document.getElementById('log').innerHTML = ''" style="font-size: 10px;">Clear</button>
+        </div>
+        <div id="log" class="log"></div>
+    </div>
+</div>
+
+<script>
+    let ws = null;
+    let requestId = 1;
+
+    function log(msg, type = 'info') {
+        const logDiv = document.getElementById('log');
+        const entry = document.createElement('div');
+        entry.style.color = type === 'error' ? '#f55' : (type === 'sent' ? '#aaf' : '#0f0');
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${type.toUpperCase()}: ${typeof msg === 'object' ? JSON.stringify(msg, null, 2) : msg}`;
+        logDiv.appendChild(entry);
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function connect() {
+        const url = document.getElementById('ws-url').value;
+        if (!url) return alert("Bitte WebSocket-URL eingeben!");
+
+        ws = new WebSocket(url);
+
+        ws.onopen = () => {
+            document.getElementById('connection-status').className = 'status connected';
+            document.getElementById('connection-status').textContent = 'Status: Connected';
+            log("WebSocket connected");
+
+            // Send initialize
+            callMethod("initialize", {
+                protocolVersion: "2024-11-05",
+                capabilities: {},
+                clientInfo: { name: "test-ui", version: "1.0.0" }
+            });
+        };
+
+        ws.onclose = () => {
+            document.getElementById('connection-status').className = 'status disconnected';
+            document.getElementById('connection-status').textContent = 'Status: Disconnected';
+            log("WebSocket disconnected");
+            ws = null;
+        };
+
+        ws.onerror = (err) => {
+            log("WebSocket error", "error");
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            log(data, "received");
+            handleMessage(data);
+        };
+    }
+
+    function disconnect() {
+        if (ws) ws.close();
+    }
+
+    function callMethod(method, params = {}) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return log("Not connected", "error");
+        const request = {
+            jsonrpc: "2.0",
+            id: requestId++,
+            method: method,
+            params: params
+        };
+        log(request, "sent");
+        ws.send(JSON.stringify(request));
+    }
+
+    function callTool(name, args = {}) {
+        callMethod("tools/call", {
+            name: name,
+            arguments: args
+        });
+    }
+
+    function subscribe(uri) {
+        callMethod("resources/subscribe", { uri: uri });
+    }
+
+    function handleMessage(data) {
+        // Simple dispatcher for UI updates
+        if (data.method === "notifications/track_changed") {
+            const track = data.params.track;
+            document.getElementById('info-track').textContent = track.artist + " - " + track.title;
+        } else if (data.method === "notifications/playback_state") {
+            document.getElementById('info-state').textContent = data.params.state;
+        } else if (data.result && data.result.content) {
+             // Handle tool call results if needed
+             const content = data.result.content[0];
+             if (content && content.text) {
+                 try {
+                     const inner = JSON.parse(content.text);
+                     if (inner.track) {
+                         document.getElementById('info-track').textContent = inner.track.artist + " - " + inner.track.title;
+                     }
+                     if (inner.state) {
+                         document.getElementById('info-state').textContent = inner.state;
+                     }
+                 } catch(e) {}
+             }
+        }
+    }
+
+    // Default URL attempt (placeholder, user needs to add token)
+    document.getElementById('ws-url').value = "ws://127.0.0.1:8080/";
+</script>
+
+</body>
+</html>
