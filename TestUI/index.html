@@ -71,9 +71,27 @@
             <button onclick="callTool('removePlaylist', {name: document.getElementById('pl-name').value})">Remove</button>
             <button onclick="callTool('getPlaylistTracks', {name: document.getElementById('pl-name').value})">Get Tracks</button>
             <br><br>
+            <div class="grid" style="grid-template-columns: 1fr auto;">
+                <input type="text" id="pl-sort" placeholder="Sort Script (e.g. %artist% | %album%)">
+                <select id="pl-order"><option value="asc">ASC</option><option value="desc">DESC</option></select>
+            </div>
+            <button onclick="callTool('sortPlaylist', {name: document.getElementById('pl-name').value, sort: document.getElementById('pl-sort').value, order: document.getElementById('pl-order').value})">Sort Playlist</button>
+            <br><br>
             Add Track (Path): <input type="text" id="track-path" placeholder="X:/path/to/song.mp3" style="width: 200px;">
             <button onclick="callTool('addTrack', {path: document.getElementById('track-path').value, playlist: document.getElementById('pl-name').value, createIfMissing: true})">Add to List</button>
             <button onclick="callTool('enqueue', {path: document.getElementById('track-path').value})">Enqueue</button>
+        </section>
+
+        <section>
+            <h2>Update Metadata</h2>
+            <div class="grid">
+                <input type="number" id="meta-id" placeholder="Track ID">
+                <input type="text" id="meta-title" placeholder="New Title">
+                <input type="text" id="meta-artist" placeholder="New Artist">
+                <input type="number" id="meta-rating" step="0.1" min="0" max="1" placeholder="Rating (0.0-1.0)">
+            </div>
+            <label><input type="checkbox" id="meta-disk"> Write to Disk (Tags)</label><br>
+            <button onclick="updateMetadata()">Update Metadata</button>
         </section>
 
         <section>
@@ -172,6 +190,25 @@
 
     function subscribe(uri) {
         callMethod("resources/subscribe", { uri: uri });
+    }
+
+    function updateMetadata() {
+        const id = parseInt(document.getElementById('meta-id').value);
+        const title = document.getElementById('meta-title').value;
+        const artist = document.getElementById('meta-artist').value;
+        const rating = parseFloat(document.getElementById('meta-rating').value);
+        const writeToDisk = document.getElementById('meta-disk').checked;
+
+        const metadata = {};
+        if (title) metadata.title = title;
+        if (artist) metadata.artists = [artist];
+        if (!isNaN(rating)) metadata.rating = rating;
+
+        callTool('updateTrackMetadata', {
+            trackIds: [id],
+            metadata: metadata,
+            writeToDisk: writeToDisk
+        });
     }
 
     function handleMessage(data) {
