@@ -25,6 +25,7 @@ private:
         std::function<QJsonObject(const QJsonObject&)> handler;
     };
 
+    QJsonObject validateArguments(const QJsonObject& schema, const QJsonObject& args);
     void registerTools();
     FooyinWrapper* m_wrapper;
     QMap<QString, Tool> m_tools;

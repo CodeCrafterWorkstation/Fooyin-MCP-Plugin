@@ -30,8 +30,9 @@ public:
     QJsonObject listPlaylists();
     QJsonObject getPlaylistTracks(const QString& name);
     QJsonObject removePlaylist(const QString& name);
+    QJsonObject sortPlaylist(const QString& name, const QString& sort, const QString& order = QString());
     QJsonObject scanLibrary();
-    QJsonObject searchLibrary(const QString& query);
+    QJsonObject searchLibrary(const QString& query, const QString& sort = QString(), const QString& order = QString());
 
     // Player Status
     QJsonObject getNowPlaying();

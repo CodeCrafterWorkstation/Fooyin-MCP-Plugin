@@ -70,6 +70,34 @@ void McpServer::broadcastNotification(const QString& method, const QJsonObject& 
         return;
     }
 
+    // Handle resource updates for subscribers
+    if (method.startsWith(QStringLiteral("notifications/playlist_"))) {
+        QJsonObject resourceNotification;
+        resourceNotification[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+        resourceNotification[QStringLiteral("method")] = QStringLiteral("notifications/resources/updated");
+        resourceNotification[QStringLiteral("params")] = QJsonObject{{QStringLiteral("uri"), QStringLiteral("playlists://")}};
+
+        QByteArray resData = QJsonDocument(resourceNotification).toJson(QJsonDocument::Compact) + "\n";
+        QString resWsData = QString::fromUtf8(resData).trimmed();
+
+        for (auto it = m_subscriptions.begin(); it != m_subscriptions.end(); ++it) {
+            bool hasSub = false;
+            for (const auto& sub : it.value()) {
+                if (sub.uri == QStringLiteral("playlists://")) {
+                    hasSub = true;
+                    break;
+                }
+            }
+            if (hasSub) {
+                if (auto* socket = qobject_cast<QLocalSocket*>(it.key())) {
+                    if (socket->state() == QLocalSocket::ConnectedState) socket->write(resData);
+                } else if (auto* ws = qobject_cast<QWebSocket*>(it.key())) {
+                    if (ws->state() == QAbstractSocket::ConnectedState) ws->sendTextMessage(resWsData);
+                }
+            }
+        }
+    }
+
     QJsonObject notification;
     notification[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
     notification[QStringLiteral("method")] = method;
@@ -134,6 +162,7 @@ void McpServer::onLocalReadyRead() {
 void McpServer::onLocalDisconnected() {
     if (auto* socket = qobject_cast<QLocalSocket*>(sender())) {
         m_localClients.removeAll(socket);
+        m_subscriptions.remove(socket);
         socket->deleteLater();
     }
 }
@@ -181,6 +210,7 @@ void McpServer::onWebSocketMessageReceived(const QString& message) {
 void McpServer::onWebSocketDisconnected() {
     if (auto* socket = qobject_cast<QWebSocket*>(sender())) {
         m_webSocketClients.removeAll(socket);
+        m_subscriptions.remove(socket);
         socket->deleteLater();
     }
 }
@@ -210,6 +240,10 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
 
         QJsonObject capabilities;
         capabilities[QStringLiteral("tools")] = QJsonObject{{QStringLiteral("listChanged"), false}};
+        capabilities[QStringLiteral("resources")] = QJsonObject{
+            {QStringLiteral("subscribe"), true},
+            {QStringLiteral("listChanged"), false}
+        };
 
         QJsonObject result;
         result[QStringLiteral("protocolVersion")] = QStringLiteral("2024-11-05");
@@ -217,6 +251,49 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
         result[QStringLiteral("serverInfo")] = serverInfo;
 
         sendResponse(device, webSocket, id, result);
+    }
+    else if (method == QStringLiteral("resources/list")) {
+        if (isNotification) return;
+        QJsonArray resources;
+        QJsonObject playlistRes;
+        playlistRes[QStringLiteral("uri")] = QStringLiteral("playlists://");
+        playlistRes[QStringLiteral("name")] = QStringLiteral("All Playlists");
+        playlistRes[QStringLiteral("description")] = QStringLiteral("Real-time list of all playlists and their metadata");
+        resources.append(playlistRes);
+
+        sendResponse(device, webSocket, id, QJsonObject{{QStringLiteral("resources"), resources}});
+    }
+    else if (method == QStringLiteral("resources/subscribe")) {
+        if (isNotification) return;
+        QString uri = params.value(QStringLiteral("uri")).toString();
+        QObject* client = device ? static_cast<QObject*>(device) : static_cast<QObject*>(webSocket);
+        m_subscriptions[client].append({uri});
+        sendResponse(device, webSocket, id, QJsonObject());
+    }
+    else if (method == QStringLiteral("resources/unsubscribe")) {
+        if (isNotification) return;
+        QString uri = params.value(QStringLiteral("uri")).toString();
+        QObject* client = device ? static_cast<QObject*>(device) : static_cast<QObject*>(webSocket);
+        if (m_subscriptions.contains(client)) {
+            auto& subs = m_subscriptions[client];
+            subs.erase(std::remove_if(subs.begin(), subs.end(), [&](const Subscription& s){ return s.uri == uri; }), subs.end());
+        }
+        sendResponse(device, webSocket, id, QJsonObject());
+    }
+    else if (method == QStringLiteral("resources/read")) {
+        if (isNotification) return;
+        QString uri = params.value(QStringLiteral("uri")).toString();
+        if (uri == QStringLiteral("playlists://")) {
+            QJsonObject playlists = m_wrapper->listPlaylists();
+            QJsonArray contents;
+            QJsonObject content;
+            content[QStringLiteral("uri")] = uri;
+            content[QStringLiteral("text")] = QString::fromUtf8(QJsonDocument(playlists).toJson(QJsonDocument::Compact));
+            contents.append(content);
+            sendResponse(device, webSocket, id, QJsonObject{{QStringLiteral("contents"), contents}});
+        } else {
+            sendError(device, webSocket, id, -32602, QStringLiteral("Invalid URI"));
+        }
     }
     else if (method == QStringLiteral("ping")) {
         if (!isNotification) sendResponse(device, webSocket, id, QJsonObject());
@@ -249,6 +326,17 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
         responseObj[QStringLiteral("content")] = QJsonArray{item};
 
         sendResponse(device, webSocket, id, responseObj);
+    }
+    else if (method == QStringLiteral("notifications/subscribe")) {
+        // Alias for resources/subscribe to support some MCP clients
+        if (isNotification) return;
+        QString uri = params.value(QStringLiteral("uri")).toString();
+        QObject* client = device ? static_cast<QObject*>(device) : static_cast<QObject*>(webSocket);
+        m_subscriptions[client].append({uri});
+        sendResponse(device, webSocket, id, QJsonObject());
+    }
+    else if (method == QStringLiteral("logging/setLevel")) {
+        if (!isNotification) sendResponse(device, webSocket, id, QJsonObject());
     }
     else if (!isNotification) {
         sendError(device, webSocket, id, -32601, QStringLiteral("Method not found"));

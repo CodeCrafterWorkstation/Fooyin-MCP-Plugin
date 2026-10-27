@@ -4,6 +4,10 @@
 #include <core/playlist/playlisthandler.h>
 #include <core/playlist/playlist.h>
 #include <core/track.h>
+#include <core/engine/enginecontroller.h>
+#include <core/scripting/trackqueryfilter.h>
+#include <core/library/tracksort.h>
+#include <core/library/librarymanager.h>
 
 #include <QJsonArray>
 #include <QFileInfo>
@@ -18,6 +22,13 @@ FooyinWrapper::FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* 
         connect(player, &Fooyin::PlayerController::currentTrackChanged, this, [this](const Fooyin::Track& track) {
             emit nowPlayingChanged(trackToJson(track));
             emit playbackStateChanged(getPlaybackState().value(QStringLiteral("state")).toString());
+        });
+    }
+
+    auto* engine = m_context.engine;
+    if (engine) {
+        connect(engine, &Fooyin::EngineController::volumeChanged, this, [this](double volume) {
+            emit volumeChanged(static_cast<float>(volume));
         });
     }
 }
@@ -69,16 +80,11 @@ QJsonObject FooyinWrapper::previous() {
 }
 
 QJsonObject FooyinWrapper::setVolume(float volume) {
-    if (!m_context.playerController) 
-        return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Player not available")}};
+    if (!m_context.engine)
+        return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Engine not available")}};
     
-    // Note: In fooyin_core, volume is usually handled via AudioEngine or similar,
-    // but PlayerController might not have a direct setVolume.
-    // If it's not in PlayerController, we'd need AudioEngine.
-    // For now, let's keep the logic or fix based on available headers.
-    // Actually, looking at PlayerController.h, setVolume is NOT there.
-    // It's likely in AudioEngine.
-    return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("setVolume not implemented in PlayerController")}};
+    m_context.engine->setVolume(static_cast<double>(volume));
+    return QJsonObject{{QStringLiteral("ok"), true}};
 }
 
 QJsonObject FooyinWrapper::seek(uint64_t ms) {
@@ -181,6 +187,28 @@ QJsonObject FooyinWrapper::removePlaylist(const QString& name) {
     return QJsonObject{{QStringLiteral("ok"), true}};
 }
 
+QJsonObject FooyinWrapper::sortPlaylist(const QString& name, const QString& sort, const QString& order) {
+    if (!m_context.playlistHandler)
+        return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("PlaylistHandler not available")}};
+
+    auto* pl = m_context.playlistHandler->playlistByName(name);
+    if (!pl) return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Playlist not found")}};
+
+    Fooyin::TrackList tracks = pl->tracks();
+    Qt::SortOrder sortOrder = (order.toLower() == QStringLiteral("desc")) ? Qt::DescendingOrder : Qt::AscendingOrder;
+
+    Fooyin::LibraryInfoMap libraries;
+    if (m_context.libraryManager) {
+        libraries = m_context.libraryManager->allLibraries();
+    }
+
+    Fooyin::TrackSorter sorter(libraries);
+    tracks = sorter.calcSortTracks(sort, tracks, sortOrder);
+
+    m_context.playlistHandler->replacePlaylistTracks(pl->id(), tracks);
+    return QJsonObject{{QStringLiteral("ok"), true}};
+}
+
 QJsonObject FooyinWrapper::enqueue(const QString& path) {
     if (!m_context.playerController)
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("PlayerController not available")}};
@@ -192,22 +220,35 @@ QJsonObject FooyinWrapper::enqueue(const QString& path) {
     return QJsonObject{{QStringLiteral("ok"), true}};
 }
 
-QJsonObject FooyinWrapper::searchLibrary(const QString& query) {
+QJsonObject FooyinWrapper::searchLibrary(const QString& query, const QString& sort, const QString& order) {
     if (!m_context.library)
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Library not available")}};
 
-    // Simplified search: just filter by title/artist in memory for now
-    // A real search would use the database query
+    Fooyin::TrackList tracks = m_context.library->tracks();
+
+    // 1. Filter using TrackQueryFilter
+    Fooyin::TrackQueryFilter filter;
+    tracks = filter.filter(query, tracks);
+
+    // 2. Sort if requested
+    if (!sort.isEmpty()) {
+        Qt::SortOrder sortOrder = (order.toLower() == QStringLiteral("desc")) ? Qt::DescendingOrder : Qt::AscendingOrder;
+
+        Fooyin::LibraryInfoMap libraries;
+        if (m_context.libraryManager) {
+            libraries = m_context.libraryManager->allLibraries();
+        }
+
+        Fooyin::TrackSorter sorter(libraries);
+        tracks = sorter.calcSortTracks(sort, tracks, sortOrder);
+    }
+
     QJsonArray arr;
     int count = 0;
-    for (const auto& track : m_context.library->tracks()) {
-        if (track.title().contains(query, Qt::CaseInsensitive) ||
-            track.artist().contains(query, Qt::CaseInsensitive) ||
-            track.album().contains(query, Qt::CaseInsensitive)) {
-            arr.append(trackToJson(track));
-            count++;
-            if (count > 100) break; // Limit results
-        }
+    for (const auto& track : tracks) {
+        arr.append(trackToJson(track));
+        count++;
+        if (count > 100) break; // Limit results
     }
     return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("tracks"), arr}};
 }

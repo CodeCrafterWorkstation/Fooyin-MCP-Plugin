@@ -51,6 +51,42 @@ void McpPlugin::initialise(const Fooyin::CorePluginContext& context) {
         }
     });
 
+    auto* playlistHandler = context.playlistHandler;
+    if (playlistHandler) {
+        connect(playlistHandler, &Fooyin::PlaylistHandler::playlistAdded, this, [this](Fooyin::Playlist* playlist) {
+            if (m_server && playlist) {
+                m_server->broadcastNotification(
+                    QStringLiteral("notifications/playlist_added"),
+                    QJsonObject{{QStringLiteral("name"), playlist->name()}}
+                );
+            }
+        });
+        connect(playlistHandler, &Fooyin::PlaylistHandler::playlistRemoved, this, [this](Fooyin::Playlist* playlist) {
+            if (m_server && playlist) {
+                m_server->broadcastNotification(
+                    QStringLiteral("notifications/playlist_removed"),
+                    QJsonObject{{QStringLiteral("name"), playlist->name()}}
+                );
+            }
+        });
+        connect(playlistHandler, &Fooyin::PlaylistHandler::playlistUpdated, this, [this](Fooyin::Playlist* playlist) {
+            if (m_server && playlist) {
+                m_server->broadcastNotification(
+                    QStringLiteral("notifications/playlist_updated"),
+                    QJsonObject{{QStringLiteral("name"), playlist->name()}, {QStringLiteral("trackCount"), playlist->trackCount()}}
+                );
+            }
+        });
+        connect(playlistHandler, &Fooyin::PlaylistHandler::activePlaylistChanged, this, [this](Fooyin::Playlist* playlist) {
+            if (m_server && playlist) {
+                m_server->broadcastNotification(
+                    QStringLiteral("notifications/active_playlist_changed"),
+                    QJsonObject{{QStringLiteral("name"), playlist->name()}}
+                );
+            }
+        });
+    }
+
     if (m_server->start()) {
         qCDebug(lcMcp) << "Server started. Pipe:" << m_server->pipeName() << "Port:" << m_server->port();
     } else {

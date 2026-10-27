@@ -26,7 +26,13 @@ QJsonObject McpTools::callTool(const QString& name, const QJsonObject& arguments
         return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Tool not found")}};
     }
 
-    QJsonObject result = m_tools[name].handler(arguments);
+    const auto& tool = m_tools[name];
+    QJsonObject validation = validateArguments(tool.inputSchema, arguments);
+    if (validation.value(QStringLiteral("isError")).toBool()) {
+        return validation;
+    }
+
+    QJsonObject result = tool.handler(arguments);
 
     // Ensure that if the wrapper says "ok: false", we mark it as "isError" for the MCP server
     if (result.contains(QStringLiteral("ok")) && !result.value(QStringLiteral("ok")).toBool()) {
@@ -34,6 +40,48 @@ QJsonObject McpTools::callTool(const QString& name, const QJsonObject& arguments
     }
 
     return result;
+}
+
+QJsonObject McpTools::validateArguments(const QJsonObject& schema, const QJsonObject& args) {
+    // Basic JSON Schema validation for MCP tools
+    QString type = schema.value(QStringLiteral("type")).toString();
+    if (type == QStringLiteral("object")) {
+        QJsonArray required = schema.value(QStringLiteral("required")).toArray();
+        for (const auto& req : required) {
+            if (!args.contains(req.toString())) {
+                return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Missing required argument: %s", req.toString().toUtf8().constData())}};
+            }
+        }
+
+        QJsonObject properties = schema.value(QStringLiteral("properties")).toObject();
+        for (auto it = args.begin(); it != args.end(); ++it) {
+            if (!properties.contains(it.key())) {
+                if (schema.value(QStringLiteral("additionalProperties")).toBool() == false) {
+                    return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Unexpected argument: %s", it.key().toUtf8().constData())}};
+                }
+                continue;
+            }
+
+            QJsonObject propSchema = properties.value(it.key()).toObject();
+            QString propType = propSchema.value(QStringLiteral("type")).toString();
+            QJsonValue val = it.value();
+
+            if (propType == QStringLiteral("string") && !val.isString()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s must be a string", it.key().toUtf8().constData())}};
+            if (propType == QStringLiteral("number") && !val.isDouble()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s must be a number", it.key().toUtf8().constData())}};
+            if (propType == QStringLiteral("integer") && !val.isDouble()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s must be an integer", it.key().toUtf8().constData())}};
+            if (propType == QStringLiteral("boolean") && !val.isBool()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s must be a boolean", it.key().toUtf8().constData())}};
+
+            if (propSchema.contains(QStringLiteral("enum"))) {
+                QJsonArray enumVals = propSchema.value(QStringLiteral("enum")).toArray();
+                bool found = false;
+                for (const auto& ev : enumVals) {
+                    if (ev == val) { found = true; break; }
+                }
+                if (!found) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s has invalid value", it.key().toUtf8().constData())}};
+            }
+        }
+    }
+    return QJsonObject{{QStringLiteral("isError"), false}};
 }
 
 void McpTools::registerTools() {
@@ -173,16 +221,43 @@ void McpTools::registerTools() {
             },
             [this](const QJsonObject& args) { return m_wrapper->removePlaylist(args.value(QStringLiteral("name")).toString()); });
 
-    addTool(QStringLiteral("searchLibrary"), QStringLiteral("Search in library"),
+    addTool(QStringLiteral("sortPlaylist"), QStringLiteral("Sort tracks in a playlist"),
             QJsonObject{
                 {QStringLiteral("type"), QStringLiteral("object")},
                 {QStringLiteral("properties"), QJsonObject{
-                    {QStringLiteral("query"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                    {QStringLiteral("name"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("description"), QStringLiteral("Name of the playlist to sort")}}}},
+                    {QStringLiteral("sort"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("description"), QStringLiteral("Sort script (e.g. %artist% | %album%)")}}}},
+                    {QStringLiteral("order"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("enum"), QJsonArray{QStringLiteral("asc"), QStringLiteral("desc")}}}}}
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("name"), QStringLiteral("sort")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) {
+                return m_wrapper->sortPlaylist(
+                    args.value(QStringLiteral("name")).toString(),
+                    args.value(QStringLiteral("sort")).toString(),
+                    args.value(QStringLiteral("order")).toString()
+                );
+            });
+
+    addTool(QStringLiteral("searchLibrary"), QStringLiteral("Search in library with optional sorting"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("query"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("description"), QStringLiteral("Fooyin query expression")}}}},
+                    {QStringLiteral("sort"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("description"), QStringLiteral("Sort script (e.g. %artist% | %album% | %tracknumber%)")}}}},
+                    {QStringLiteral("order"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("enum"), QJsonArray{QStringLiteral("asc"), QStringLiteral("desc")}}}}}
                 }},
                 {QStringLiteral("required"), QJsonArray{QStringLiteral("query")}},
                 {QStringLiteral("additionalProperties"), false}
             },
-            [this](const QJsonObject& args) { return m_wrapper->searchLibrary(args.value(QStringLiteral("query")).toString()); });
+            [this](const QJsonObject& args) {
+                return m_wrapper->searchLibrary(
+                    args.value(QStringLiteral("query")).toString(),
+                    args.value(QStringLiteral("sort")).toString(),
+                    args.value(QStringLiteral("order")).toString()
+                );
+            });
 
     // --- INFO / STATE ---
     addTool(QStringLiteral("getNowPlaying"), QStringLiteral("Returns currently playing track info"), emptySchema(),

@@ -8,6 +8,7 @@
 #include <QtWebSockets/QWebSocketCorsAuthenticator>
 #include <QJsonObject>
 #include <QList>
+#include <QMap>
 #include <memory>
 #include "fooyin_wrapper.h"
 #include "mcp_tools.h"
@@ -47,6 +48,11 @@ private:
     void sendResponse(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, const QJsonObject& result);
     void sendError(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, int code, const QString& message);
     bool isAllowedOrigin(const QString& origin);
+
+    struct Subscription {
+        QString uri;
+    };
+    QMap<QObject*, QList<Subscription>> m_subscriptions;
 
     QLocalServer* m_localServer;
     QList<QLocalSocket*> m_localClients;
