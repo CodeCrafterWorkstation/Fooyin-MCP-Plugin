@@ -100,7 +100,7 @@ namespace FooyinMCP {
                 emitPlaybackStateIfChanged();
             });
 
-            connect(player, &Fooyin::PlayerController::playbackStateChanged, this, [this]() {
+            connect(player, &Fooyin::PlayerController::playStateChanged, this, [this](Fooyin::Player::PlayState, Fooyin::Player::PlayState) {
                 emitPlaybackStateIfChanged();
             });
 
@@ -472,10 +472,10 @@ namespace FooyinMCP {
 
         auto* player = m_context.playerController;
         QString stateStr = QStringLiteral("stopped");
-        auto state = player->playbackState();
+        auto state = player->playState();
 
-        if (state == Fooyin::PlayerController::PlayingState) stateStr = QStringLiteral("playing");
-        else if (state == Fooyin::PlayerController::PausedState) stateStr = QStringLiteral("paused");
+        if (state == Fooyin::Player::PlayState::Playing) stateStr = QStringLiteral("playing");
+        else if (state == Fooyin::Player::PlayState::Paused) stateStr = QStringLiteral("paused");
 
         return QJsonObject{
                 {QStringLiteral("ok"), true},
