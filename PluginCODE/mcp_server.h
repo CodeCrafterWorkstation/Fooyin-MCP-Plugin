@@ -13,6 +13,8 @@
 #include "fooyin_wrapper.h"
 #include "mcp_tools.h"
 
+#include <core/scripting/scriptcontextservice.h>
+
 namespace FooyinMCP {
 
 class McpServer : public QObject {
@@ -44,14 +46,17 @@ private slots:
     void onOriginAuthenticationRequired(QWebSocketCorsAuthenticator* authenticator);
 
 private:
+    struct Subscription {
+        QString uri;
+        Fooyin::ScriptSubscription* scriptSub = nullptr;
+    };
+
     void handleRequest(QIODevice* device, QWebSocket* webSocket, const QJsonObject& request);
     void sendResponse(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, const QJsonObject& result);
     void sendError(QIODevice* device, QWebSocket* webSocket, const QJsonValue& id, int code, const QString& message);
     bool isAllowedOrigin(const QString& origin);
+    void setupScriptSubscription(QObject* client, Subscription& sub, QIODevice* device, QWebSocket* webSocket);
 
-    struct Subscription {
-        QString uri;
-    };
     QMap<QObject*, QList<Subscription>> m_subscriptions;
 
     QLocalServer* m_localServer;

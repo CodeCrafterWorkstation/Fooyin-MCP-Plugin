@@ -45,31 +45,32 @@ QJsonObject McpTools::callTool(const QString& name, const QJsonObject& arguments
 QJsonObject McpTools::validateArguments(const QJsonObject& schema, const QJsonObject& args) {
     // Basic JSON Schema validation for MCP tools
     QString type = schema.value(QStringLiteral("type")).toString();
-    if (type == QStringLiteral("object")) {
-        QJsonArray required = schema.value(QStringLiteral("required")).toArray();
-        for (const auto& req : required) {
-            if (!args.contains(req.toString())) {
-                return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Missing required argument: %s", req.toString().toUtf8().constData())}};
-            }
-        }
-
-        QJsonObject properties = schema.value(QStringLiteral("properties")).toObject();
-        for (auto it = args.begin(); it != args.end(); ++it) {
-            if (!properties.contains(it.key())) {
-                if (schema.value(QStringLiteral("additionalProperties")).toBool() == false) {
-                    return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Unexpected argument: %s", it.key().toUtf8().constData())}};
+            if (type == QStringLiteral("object")) {
+                QJsonArray required = schema.value(QStringLiteral("required")).toArray();
+                for (const auto& req : required) {
+                    if (!args.contains(req.toString())) {
+                        return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Missing required argument: ") + req.toString()}};
+                    }
                 }
-                continue;
-            }
 
-            QJsonObject propSchema = properties.value(it.key()).toObject();
-            QString propType = propSchema.value(QStringLiteral("type")).toString();
-            QJsonValue val = it.value();
+                QJsonObject properties = schema.value(QStringLiteral("properties")).toObject();
+                for (auto it = args.begin(); it != args.end(); ++it) {
+                    if (!properties.contains(it.key())) {
+                        if (schema.value(QStringLiteral("additionalProperties")).toBool() == false) {
+                            return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Unexpected argument: ") + it.key()}};
+                        }
+                        continue;
+                    }
 
-            if (propType == QStringLiteral("string") && !val.isString()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s must be a string", it.key().toUtf8().constData())}};
-            if (propType == QStringLiteral("number") && !val.isDouble()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s must be a number", it.key().toUtf8().constData())}};
-            if (propType == QStringLiteral("integer") && !val.isDouble()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s must be an integer", it.key().toUtf8().constData())}};
-            if (propType == QStringLiteral("boolean") && !val.isBool()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s must be a boolean", it.key().toUtf8().constData())}};
+                    QJsonObject propSchema = properties.value(it.key()).toObject();
+                    QString propType = propSchema.value(QStringLiteral("type")).toString();
+                    QJsonValue val = it.value();
+
+                    if (propType == QStringLiteral("string") && !val.isString()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be a string")}};
+                    if (propType == QStringLiteral("number") && !val.isDouble()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be a number")}};
+                    if (propType == QStringLiteral("integer") && !val.isDouble()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be an integer")}};
+                    if (propType == QStringLiteral("boolean") && !val.isBool()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be a boolean")}};
+
 
             if (propSchema.contains(QStringLiteral("enum"))) {
                 QJsonArray enumVals = propSchema.value(QStringLiteral("enum")).toArray();
@@ -77,7 +78,7 @@ QJsonObject McpTools::validateArguments(const QJsonObject& schema, const QJsonOb
                 for (const auto& ev : enumVals) {
                     if (ev == val) { found = true; break; }
                 }
-                if (!found) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QString::format("Argument %s has invalid value", it.key().toUtf8().constData())}};
+                if (!found) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" has invalid value")}};
             }
         }
     }
@@ -225,9 +226,18 @@ void McpTools::registerTools() {
             QJsonObject{
                 {QStringLiteral("type"), QStringLiteral("object")},
                 {QStringLiteral("properties"), QJsonObject{
-                    {QStringLiteral("name"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("description"), QStringLiteral("Name of the playlist to sort")}}}},
-                    {QStringLiteral("sort"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("description"), QStringLiteral("Sort script (e.g. %artist% | %album%)")}}}},
-                    {QStringLiteral("order"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("enum"), QJsonArray{QStringLiteral("asc"), QStringLiteral("desc")}}}}}
+                    {QStringLiteral("name"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("string")},
+                        {QStringLiteral("description"), QStringLiteral("Name of the playlist to sort")}
+                    }},
+                    {QStringLiteral("sort"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("string")},
+                        {QStringLiteral("description"), QStringLiteral("Sort script (e.g. %artist% | %album%)")}
+                    }},
+                    {QStringLiteral("order"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("string")},
+                        {QStringLiteral("enum"), QJsonArray{QStringLiteral("asc"), QStringLiteral("desc")}}
+                    }}
                 }},
                 {QStringLiteral("required"), QJsonArray{QStringLiteral("name"), QStringLiteral("sort")}},
                 {QStringLiteral("additionalProperties"), false}
@@ -244,9 +254,18 @@ void McpTools::registerTools() {
             QJsonObject{
                 {QStringLiteral("type"), QStringLiteral("object")},
                 {QStringLiteral("properties"), QJsonObject{
-                    {QStringLiteral("query"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("description"), QStringLiteral("Fooyin query expression")}}}},
-                    {QStringLiteral("sort"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("description"), QStringLiteral("Sort script (e.g. %artist% | %album% | %tracknumber%)")}}}},
-                    {QStringLiteral("order"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string"), {QStringLiteral("enum"), QJsonArray{QStringLiteral("asc"), QStringLiteral("desc")}}}}}
+                    {QStringLiteral("query"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("string")},
+                        {QStringLiteral("description"), QStringLiteral("Fooyin query expression")}
+                    }},
+                    {QStringLiteral("sort"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("string")},
+                        {QStringLiteral("description"), QStringLiteral("Sort script (e.g. %artist% | %album% | %tracknumber%)")}
+                    }},
+                    {QStringLiteral("order"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("string")},
+                        {QStringLiteral("enum"), QJsonArray{QStringLiteral("asc"), QStringLiteral("desc")}}
+                    }}
                 }},
                 {QStringLiteral("required"), QJsonArray{QStringLiteral("query")}},
                 {QStringLiteral("additionalProperties"), false}
@@ -268,6 +287,49 @@ void McpTools::registerTools() {
 
     addTool(QStringLiteral("scanLibrary"), QStringLiteral("Triggers a library scan"), emptySchema(),
             [this](const QJsonObject&) { return m_wrapper->scanLibrary(); });
+
+    addTool(QStringLiteral("updateTrackMetadata"), QStringLiteral("Updates metadata for tracks"),
+            QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("object")},
+                {QStringLiteral("properties"), QJsonObject{
+                    {QStringLiteral("trackIds"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("array")},
+                        {QStringLiteral("items"), QJsonObject{{QStringLiteral("type"), QStringLiteral("integer")}}}
+                    }},
+                    {QStringLiteral("metadata"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("object")},
+                        {QStringLiteral("properties"), QJsonObject{
+                            {QStringLiteral("title"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}},
+                            {QStringLiteral("album"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}},
+                            {QStringLiteral("year"), QJsonObject{{QStringLiteral("type"), QStringLiteral("integer")}}},
+                            {QStringLiteral("rating"), QJsonObject{{QStringLiteral("type"), QStringLiteral("number")}}},
+                            {QStringLiteral("artists"), QJsonObject{
+                                {QStringLiteral("type"), QStringLiteral("array")},
+                                {QStringLiteral("items"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                            }},
+                            {QStringLiteral("albumArtists"), QJsonObject{
+                                {QStringLiteral("type"), QStringLiteral("array")},
+                                {QStringLiteral("items"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                            }},
+                            {QStringLiteral("genres"), QJsonObject{
+                                {QStringLiteral("type"), QStringLiteral("array")},
+                                {QStringLiteral("items"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                            }},
+                            {QStringLiteral("comment"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
+                        }}
+                    }},
+                    {QStringLiteral("writeToDisk"), QJsonObject{{QStringLiteral("type"), QStringLiteral("boolean")}}},
+                }},
+                {QStringLiteral("required"), QJsonArray{QStringLiteral("trackIds"), QStringLiteral("metadata")}},
+                {QStringLiteral("additionalProperties"), false}
+            },
+            [this](const QJsonObject& args) {
+                return m_wrapper->updateTrackMetadata(
+                    args.value(QStringLiteral("trackIds")).toArray(),
+                    args.value(QStringLiteral("metadata")).toObject(),
+                    args.value(QStringLiteral("writeToDisk")).toBool()
+                );
+            });
 }
 
 } // namespace FooyinMCP

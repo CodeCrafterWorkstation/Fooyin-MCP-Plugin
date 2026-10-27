@@ -6,6 +6,8 @@
 #include <QString>
 #include <memory>
 #include <cmath>
+#include <core/playlist/playlisthandler.h>
+#include <core/playlist/playlist.h>
 
 namespace FooyinMCP {
 

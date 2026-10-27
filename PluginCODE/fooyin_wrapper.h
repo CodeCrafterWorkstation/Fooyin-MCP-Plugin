@@ -33,6 +33,9 @@ public:
     QJsonObject sortPlaylist(const QString& name, const QString& sort, const QString& order = QString());
     QJsonObject scanLibrary();
     QJsonObject searchLibrary(const QString& query, const QString& sort = QString(), const QString& order = QString());
+    QJsonObject updateTrackMetadata(const QJsonArray& trackIds, const QJsonObject& metadata, bool writeToDisk);
+
+    Fooyin::ScriptContextService* scriptContext() const { return m_context.scriptContext; }
 
     // Player Status
     QJsonObject getNowPlaying();

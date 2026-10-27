@@ -25,12 +25,14 @@ FooyinWrapper::FooyinWrapper(const Fooyin::CorePluginContext& context, QObject* 
         });
     }
 
+    /*
     auto* engine = m_context.engine;
     if (engine) {
         connect(engine, &Fooyin::EngineController::volumeChanged, this, [this](double volume) {
             emit volumeChanged(static_cast<float>(volume));
         });
     }
+    */
 }
 
 QJsonObject FooyinWrapper::trackToJson(const Fooyin::Track& track) {
@@ -80,11 +82,9 @@ QJsonObject FooyinWrapper::previous() {
 }
 
 QJsonObject FooyinWrapper::setVolume(float volume) {
-    if (!m_context.engine)
-        return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Engine not available")}};
-    
-    m_context.engine->setVolume(static_cast<double>(volume));
-    return QJsonObject{{QStringLiteral("ok"), true}};
+    // Volume API missing in EngineController, stubbing for now
+    Q_UNUSED(volume);
+    return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Volume control not supported in this version")}};
 }
 
 QJsonObject FooyinWrapper::seek(uint64_t ms) {
@@ -258,6 +258,79 @@ QJsonObject FooyinWrapper::scanLibrary() {
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Library not available")}};
     m_context.library->refreshAll();
     return QJsonObject{{QStringLiteral("ok"), true}};
+}
+
+QJsonObject FooyinWrapper::updateTrackMetadata(const QJsonArray& trackIds, const QJsonObject& metadata, bool writeToDisk)
+{
+    auto library = m_context.library;
+    if (!library) {
+        QJsonObject err;
+        err[QStringLiteral("error")] = QStringLiteral("Library not available");
+        return err;
+    }
+
+    Fooyin::TrackIds ids;
+    for (const auto& val : trackIds) {
+        if (val.isDouble()) ids.push_back(static_cast<int>(val.toDouble()));
+    }
+
+    if (ids.empty()) {
+        QJsonObject err;
+        err[QStringLiteral("error")] = QStringLiteral("No valid track IDs provided");
+        return err;
+    }
+
+    Fooyin::TrackList tracks = library->tracksForIds(ids);
+    if (tracks.empty()) {
+        QJsonObject err;
+        err[QStringLiteral("error")] = QStringLiteral("Tracks not found");
+        return err;
+    }
+
+    for (auto& track : tracks) {
+        if (metadata.contains("title")) track.setTitle(metadata["title"].toString());
+        if (metadata.contains("album")) track.setAlbum(metadata["album"].toString());
+        if (metadata.contains("year")) track.setYear(metadata["year"].toInt());
+        if (metadata.contains("trackNumber")) track.setTrackNumber(metadata["trackNumber"].toString());
+        if (metadata.contains("trackTotal")) track.setTrackTotal(metadata["trackTotal"].toString());
+        if (metadata.contains("discNumber")) track.setDiscNumber(metadata["discNumber"].toString());
+        if (metadata.contains("discTotal")) track.setDiscTotal(metadata["discTotal"].toString());
+        if (metadata.contains("comment")) track.setComment(metadata["comment"].toString());
+        if (metadata.contains("date")) track.setDate(metadata["date"].toString());
+
+        if (metadata.contains("artists")) {
+            QStringList artists;
+            for (const auto& a : metadata["artists"].toArray()) artists << a.toString();
+            track.setArtists(artists);
+        }
+        if (metadata.contains("albumArtists")) {
+            QStringList artists;
+            for (const auto& a : metadata["albumArtists"].toArray()) artists << a.toString();
+            track.setAlbumArtists(artists);
+        }
+        if (metadata.contains("genres")) {
+            QStringList genres;
+            for (const auto& g : metadata["genres"].toArray()) genres << g.toString();
+            track.setGenres(genres);
+        }
+
+        // Special handling for Rating
+        if (metadata.contains("rating")) {
+            double r = metadata["rating"].toDouble();
+            track.setRating(static_cast<float>(r));
+        }
+    }
+
+    if (writeToDisk) {
+        library->writeTrackMetadata(tracks);
+    } else {
+        library->updateTrackMetadata(tracks);
+    }
+
+    QJsonObject res;
+    res[QStringLiteral("status")] = QStringLiteral("success");
+    res[QStringLiteral("updatedCount")] = static_cast<int>(tracks.size());
+    return res;
 }
 
 QJsonObject FooyinWrapper::getNowPlaying() {

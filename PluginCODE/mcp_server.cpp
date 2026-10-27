@@ -162,7 +162,12 @@ void McpServer::onLocalReadyRead() {
 void McpServer::onLocalDisconnected() {
     if (auto* socket = qobject_cast<QLocalSocket*>(sender())) {
         m_localClients.removeAll(socket);
-        m_subscriptions.remove(socket);
+        if (m_subscriptions.contains(socket)) {
+            for (auto& sub : m_subscriptions[socket]) {
+                if (sub.scriptSub) sub.scriptSub->deleteLater();
+            }
+            m_subscriptions.remove(socket);
+        }
         socket->deleteLater();
     }
 }
@@ -210,9 +215,45 @@ void McpServer::onWebSocketMessageReceived(const QString& message) {
 void McpServer::onWebSocketDisconnected() {
     if (auto* socket = qobject_cast<QWebSocket*>(sender())) {
         m_webSocketClients.removeAll(socket);
-        m_subscriptions.remove(socket);
+        if (m_subscriptions.contains(socket)) {
+            for (auto& sub : m_subscriptions[socket]) {
+                if (sub.scriptSub) sub.scriptSub->deleteLater();
+            }
+            m_subscriptions.remove(socket);
+        }
         socket->deleteLater();
     }
+}
+
+void McpServer::setupScriptSubscription(QObject* client, Subscription& sub, QIODevice* device, QWebSocket* webSocket)
+{
+    if (!sub.uri.startsWith(QStringLiteral("scripts://"))) return;
+    auto* service = m_wrapper->scriptContext();
+    if (!service) return;
+
+    QString encodedScript = sub.uri.mid(10);
+    QString script = QUrl::fromPercentEncoding(encodedScript.toUtf8());
+
+    sub.scriptSub = service->subscribe(this);
+    sub.scriptSub->setScript(script);
+
+    connect(sub.scriptSub, &Fooyin::ScriptSubscription::changed, this, [device, webSocket, uri = sub.uri](const Fooyin::ScriptChanges& changes) {
+        Q_UNUSED(changes);
+        QJsonObject params;
+        params[QStringLiteral("uri")] = uri;
+
+        // We could include the new value here if we evaluate it
+        // For now, just notifying of change is enough per MCP spec
+
+        QJsonObject notification;
+        notification[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+        notification[QStringLiteral("method")] = QStringLiteral("notifications/resources/updated");
+        notification[QStringLiteral("params")] = params;
+
+        QByteArray data = QJsonDocument(notification).toJson(QJsonDocument::Compact);
+        if (device) device->write(data + "\n");
+        else if (webSocket) webSocket->sendTextMessage(QString::fromUtf8(data));
+    });
 }
 
 void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJsonObject& request) {
@@ -236,7 +277,7 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
         if (isNotification) return;
         QJsonObject serverInfo;
         serverInfo[QStringLiteral("name")] = QStringLiteral("fooyin-mcp-plugin");
-        serverInfo[QStringLiteral("version")] = QStringLiteral("1.2.1");
+        serverInfo[QStringLiteral("version")] = QStringLiteral("1.3.0");
 
         QJsonObject capabilities;
         capabilities[QStringLiteral("tools")] = QJsonObject{{QStringLiteral("listChanged"), false}};
@@ -267,7 +308,13 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
         if (isNotification) return;
         QString uri = params.value(QStringLiteral("uri")).toString();
         QObject* client = device ? static_cast<QObject*>(device) : static_cast<QObject*>(webSocket);
-        m_subscriptions[client].append({uri});
+
+        Subscription sub;
+        sub.uri = uri;
+        if (uri.startsWith(QStringLiteral("scripts://"))) {
+            setupScriptSubscription(client, sub, device, webSocket);
+        }
+        m_subscriptions[client].append(sub);
         sendResponse(device, webSocket, id, QJsonObject());
     }
     else if (method == QStringLiteral("resources/unsubscribe")) {
@@ -276,7 +323,11 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
         QObject* client = device ? static_cast<QObject*>(device) : static_cast<QObject*>(webSocket);
         if (m_subscriptions.contains(client)) {
             auto& subs = m_subscriptions[client];
-            subs.erase(std::remove_if(subs.begin(), subs.end(), [&](const Subscription& s){ return s.uri == uri; }), subs.end());
+            auto it = std::find_if(subs.begin(), subs.end(), [&](const Subscription& s){ return s.uri == uri; });
+            if (it != subs.end()) {
+                if (it->scriptSub) it->scriptSub->deleteLater();
+                subs.erase(it);
+            }
         }
         sendResponse(device, webSocket, id, QJsonObject());
     }
@@ -332,7 +383,13 @@ void McpServer::handleRequest(QIODevice* device, QWebSocket* webSocket, const QJ
         if (isNotification) return;
         QString uri = params.value(QStringLiteral("uri")).toString();
         QObject* client = device ? static_cast<QObject*>(device) : static_cast<QObject*>(webSocket);
-        m_subscriptions[client].append({uri});
+
+        Subscription sub;
+        sub.uri = uri;
+        if (uri.startsWith(QStringLiteral("scripts://"))) {
+            setupScriptSubscription(client, sub, device, webSocket);
+        }
+        m_subscriptions[client].append(sub);
         sendResponse(device, webSocket, id, QJsonObject());
     }
     else if (method == QStringLiteral("logging/setLevel")) {
