@@ -177,8 +177,8 @@ void McpServer::onNewLocalConnection() {
     }
 
     m_localClients << socket;
-    // Local pipe doesn't require token by default if permissions are restrictive
-    m_clientStates[socket].authenticated = true;
+    // Require token if set, even for local pipes for consistent security
+    m_clientStates[socket].authenticated = m_token.isEmpty();
 
     connect(socket, &QLocalSocket::readyRead, this, &McpServer::onLocalReadyRead);
     connect(socket, &QLocalSocket::disconnected, this, &McpServer::onLocalDisconnected);
@@ -280,6 +280,13 @@ void McpServer::onWebSocketDisconnected() {
 }
 
 void McpServer::handleRequest(QObject* client, QIODevice* device, QWebSocket* webSocket, const QJsonObject& request) {
+    if (thread() != QThread::currentThread()) {
+        QMetaObject::invokeMethod(this, [this, client, device, webSocket, request]() {
+            handleRequest(client, device, webSocket, request);
+        }, Qt::QueuedConnection);
+        return;
+    }
+
     auto& state = m_clientStates[client];
     QJsonValue id = request.value(QStringLiteral("id"));
     const bool isNotification = !request.contains(QStringLiteral("id"));

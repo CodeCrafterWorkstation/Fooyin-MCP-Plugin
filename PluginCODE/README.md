@@ -31,6 +31,24 @@ cmake --build . --config Release
 
 4. Kopiere die entstandene `fooyin_mcp_plugin.dll` in den `plugins`-Ordner deiner Fooyin-Installation.
 
+## Sicherheit & Authentifizierung
+Das Plugin implementiert mehrere Sicherheitsstufen:
+- **Localhost Binding:** Der WebSocket-Server bindet ausschließlich an `127.0.0.1`.
+- **Origin Check:** Browser-basierte Clients werden blockiert, sofern sie nicht von `localhost` kommen.
+- **Token-Authentifizierung:** Alle Verbindungen (WebSocket & Pipe) müssen sich mit einem Token authentifizieren, sofern einer beim Start konfiguriert wurde.
+- **DoS Schutz:** Maximale Nachrichtengröße (1MB) und maximale Verbindungsanzahl (20) werden erzwungen.
+
+### Authentifizierung (JSON-RPC)
+Nach dem Verbindungsaufbau muss als erster Request `authenticate` gesendet werden:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "authenticate",
+  "params": { "token": "DEIN_SICHERER_TOKEN" }
+}
+```
+
 ## MCP Konfiguration
 
 Um das Plugin in **Claude Desktop** oder **Cursor** zu nutzen, musst du einen "Staging-Client" (Bridge) verwenden, der von JSON-RPC auf die Named Pipe übersetzt. Da das Plugin direkt eine Named Pipe öffnet, kannst du ein einfaches Python-Skript oder ein Node.js-Tool als Bridge nutzen.

@@ -43,34 +43,45 @@ QJsonObject McpTools::callTool(const QString& name, const QJsonObject& arguments
 }
 
 QJsonObject McpTools::validateArguments(const QJsonObject& schema, const QJsonObject& args) {
-    // Basic JSON Schema validation for MCP tools
     QString type = schema.value(QStringLiteral("type")).toString();
-            if (type == QStringLiteral("object")) {
-                QJsonArray required = schema.value(QStringLiteral("required")).toArray();
-                for (const auto& req : required) {
-                    if (!args.contains(req.toString())) {
-                        return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Missing required argument: ") + req.toString()}};
-                    }
+    if (type == QStringLiteral("object")) {
+        QJsonArray required = schema.value(QStringLiteral("required")).toArray();
+        for (const auto& req : required) {
+            if (!args.contains(req.toString())) {
+                return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Missing required argument: ") + req.toString()}};
+            }
+        }
+
+        QJsonObject properties = schema.value(QStringLiteral("properties")).toObject();
+        for (auto it = args.begin(); it != args.end(); ++it) {
+            if (!properties.contains(it.key())) {
+                if (schema.value(QStringLiteral("additionalProperties")).toBool(true) == false) {
+                    return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Unexpected argument: ") + it.key()}};
                 }
+                continue;
+            }
 
-                QJsonObject properties = schema.value(QStringLiteral("properties")).toObject();
-                for (auto it = args.begin(); it != args.end(); ++it) {
-                    if (!properties.contains(it.key())) {
-                        if (schema.value(QStringLiteral("additionalProperties")).toBool() == false) {
-                            return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Unexpected argument: ") + it.key()}};
-                        }
-                        continue;
-                    }
+            QJsonObject propSchema = properties.value(it.key()).toObject();
+            QString propType = propSchema.value(QStringLiteral("type")).toString();
+            QJsonValue val = it.value();
 
-                    QJsonObject propSchema = properties.value(it.key()).toObject();
-                    QString propType = propSchema.value(QStringLiteral("type")).toString();
-                    QJsonValue val = it.value();
+            if (propType == QStringLiteral("string") && !val.isString())
+                return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be a string")}};
+            if (propType == QStringLiteral("number") && !val.isDouble())
+                return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be a number")}};
+            if (propType == QStringLiteral("integer") && !val.isDouble())
+                return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be an integer")}};
+            if (propType == QStringLiteral("boolean") && !val.isBool())
+                return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be a boolean")}};
+            if (propType == QStringLiteral("array") && !val.isArray())
+                return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be an array")}};
+            if (propType == QStringLiteral("object") && !val.isObject())
+                return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be an object")}};
 
-                    if (propType == QStringLiteral("string") && !val.isString()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be a string")}};
-                    if (propType == QStringLiteral("number") && !val.isDouble()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be a number")}};
-                    if (propType == QStringLiteral("integer") && !val.isDouble()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be an integer")}};
-                    if (propType == QStringLiteral("boolean") && !val.isBool()) return QJsonObject{{QStringLiteral("isError"), true}, {QStringLiteral("error"), QStringLiteral("Argument ") + it.key() + QStringLiteral(" must be a boolean")}};
-
+            if (propType == QStringLiteral("object") && val.isObject()) {
+                QJsonObject subValidation = validateArguments(propSchema, val.toObject());
+                if (subValidation.value(QStringLiteral("isError")).toBool()) return subValidation;
+            }
 
             if (propSchema.contains(QStringLiteral("enum"))) {
                 QJsonArray enumVals = propSchema.value(QStringLiteral("enum")).toArray();

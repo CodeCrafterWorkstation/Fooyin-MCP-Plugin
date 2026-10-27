@@ -1,8 +1,8 @@
 {
   "Name": "Fooyin MCP Bridge Plugin",
-  "Version": "1.2.1",
+  "Version": "1.3.0",
   "Author": "slu",
-  "Description": "High-performance C++20/Qt6 MCP Plugin for Fooyin Audio Player with real-time push notifications and secure JSON-RPC 2.0 interface.",
+  "Description": "Advanced C++20/Qt6 MCP Plugin for Fooyin with structured search, track sorting, and real-time resource subscriptions.",
   "Category": "Integration",
   "License": "GPL-3.0-or-later"
 }

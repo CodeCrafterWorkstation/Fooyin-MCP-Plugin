@@ -121,7 +121,8 @@ QJsonObject FooyinWrapper::addTrack(const QString& path, const QString& playlist
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("File not found")}};
     }
 
-    Fooyin::Track track(path);
+    QString absolutePath = fi.absoluteFilePath();
+    Fooyin::Track track(absolutePath);
     if (!track.isValid()) {
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Invalid track file")}};
     }
@@ -218,7 +219,12 @@ QJsonObject FooyinWrapper::enqueue(const QString& path) {
     if (!m_context.playerController)
         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("PlayerController not available")}};
 
-    Fooyin::Track track(path);
+    QFileInfo fi(path);
+    if (!fi.exists()) {
+         return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("File not found")}};
+    }
+
+    Fooyin::Track track(fi.absoluteFilePath());
     if (!track.isValid()) return QJsonObject{{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Invalid track")}};
 
     m_context.playerController->queueTrack(track);
