@@ -1,6 +1,6 @@
 # Fooyin MCP Plugin
 
-**DISCLAIMER:** This project was developed with the assistance of Large Language Models (LLMs). It is currently in **Early Alpha**. Use at your own risk. The authors assume no liability for any damages to your system or music library.
+<span style="color:red">**DISCLAIMER: This project was developed with the assistance of Large Language Models (LLMs). It is currently in Early Alpha. Use at your own risk. The authors assume no liability for any damages to your system or music library.**</span>
 
 ## Overview
 Integrates the **Fooyin Audio Player** with the **Model Context Protocol (MCP)**, allowing AI assistants (Claude, Cursor, etc.) to control playback and manage your library.
